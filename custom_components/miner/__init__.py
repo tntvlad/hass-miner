@@ -50,14 +50,24 @@ def _ensure_pyasic():
         if mod_name.startswith('pyasic'):
             del sys.modules[mod_name]
     
+    # Import after clearing cache - may still fail due to race conditions
     import pyasic
+    if not hasattr(pyasic, 'get_miner'):
+        raise ImportError("pyasic module loaded but incomplete")
     return pyasic
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Set up Miner from a config entry."""
     # Import pyasic in executor to avoid blocking the event loop
-    pyasic = await hass.async_add_executor_job(_ensure_pyasic)
+    try:
+        pyasic = await hass.async_add_executor_job(_ensure_pyasic)
+    except (ImportError, KeyError) as err:
+        # Clear broken modules so next retry has fresh start
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith('pyasic'):
+                del sys.modules[mod_name]
+        raise ConfigEntryNotReady(f"pyasic import failed: {err}") from err
 
     # Import coordinator and services AFTER pyasic is installed
     from .coordinator import MinerCoordinator

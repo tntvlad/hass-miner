@@ -83,14 +83,17 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             await miner.resume_mining()
         except Exception as err:
             # VNish and some firmwares return empty response but still work
-            _LOGGER.warning(f"{self.coordinator.config_entry.title}: Resume API returned error (may still work): {err}")
-        if miner.supports_power_modes and self._last_mining_mode:
-            try:
+            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Resume API returned error (expected for VNish): {err}")
+        
+        # Try to restore mining mode config - skip if not supported or fails
+        try:
+            if miner.supports_power_modes and self._last_mining_mode:
                 config = await miner.get_config()
                 config.mining_mode = self._last_mining_mode
                 await miner.send_config(config)
-            except Exception as err:
-                _LOGGER.warning(f"{self.coordinator.config_entry.title}: Could not restore config: {err}")
+        except Exception as err:
+            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Could not restore config (expected for some firmwares): {err}")
+        
         self.updating_switch = True
         self.async_write_ha_state()
 
@@ -100,17 +103,20 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
         _LOGGER.debug(f"{self.coordinator.config_entry.title}: Stop mining.")
         if not miner.supports_shutdown:
             raise TypeError(f"{miner}: Shutdown not supported.")
-        if miner.supports_power_modes:
-            try:
+        
+        # Try to save mining mode config - skip if not supported or fails
+        try:
+            if miner.supports_power_modes:
                 self._last_mining_mode = self.coordinator.data.get("config", {}).mining_mode if self.coordinator.data.get("config") else None
-            except Exception:
-                self._last_mining_mode = None
+        except Exception:
+            self._last_mining_mode = None
+        
         self._attr_is_on = False
         try:
             await miner.stop_mining()
         except Exception as err:
             # VNish and some firmwares return empty response but still work
-            _LOGGER.warning(f"{self.coordinator.config_entry.title}: Stop API returned error (may still work): {err}")
+            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Stop API returned error (expected for VNish): {err}")
         self.updating_switch = True
         self.async_write_ha_state()
 
