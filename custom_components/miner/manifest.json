@@ -1,15 +1,15 @@
 {
   "domain": "miner",
   "name": "Miner",
-  "codeowners": ["@Schnitzel"],
+  "codeowners": ["@tntvlad"],
   "config_flow": true,
   "dependencies": ["network"],
-  "documentation": "https://github.com/Schnitzel/hass-miner",
+  "documentation": "https://github.com/tntvlad/hass-miner",
   "homekit": {},
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/Schnitzel/hass-miner/issues",
+  "issue_tracker": "https://github.com/tntvlad/hass-miner/issues",
   "requirements": [],
   "ssdp": [],
-  "version": "1.2.8",
+  "version": "1.3.0",
   "zeroconf": []
 }

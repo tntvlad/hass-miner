@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import aiohttp
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import EntityCategory
 from homeassistant.const import UnitOfPower
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_WEB_USERNAME, CONF_WEB_PASSWORD
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,13 +128,53 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
                 f"{self.coordinator.config_entry.title}: Tuning not supported."
             )
 
-        result = await miner.set_power_limit(int(value))
+        # Check if this is a BOS miner - use REST API to avoid restart
+        miner_class_name = miner.__class__.__name__
+        if "BOSer" in miner_class_name or "BOS" in miner_class_name:
+            result = await self._set_power_via_bos_api(int(value))
+        else:
+            result = await miner.set_power_limit(int(value))
 
         if not result:
             raise pyasic.APIError("Failed to set wattage.")
 
         self._attr_native_value = value
         self.async_write_ha_state()
+
+    async def _set_power_via_bos_api(self, watt: int) -> bool:
+        """Set power target using BOS REST API (doesn't restart miner)."""
+        ip = self.coordinator.data["ip"]
+        username = self.coordinator.config_entry.data.get(CONF_WEB_USERNAME, "root")
+        password = self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "root")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Login to get auth token
+                async with session.post(
+                    f"http://{ip}/api/v1/auth/login",
+                    json={"username": username, "password": password},
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error(f"BOS API login failed: {resp.status}")
+                        return False
+                    login_data = await resp.json()
+                    token = login_data.get("token")
+
+                # Set power target (no "Bearer" prefix for BOS API)
+                async with session.put(
+                    f"http://{ip}/api/v1/performance/power-target",
+                    json={"watt": watt},
+                    headers={"Authorization": token},
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error(f"BOS API set power failed: {resp.status}")
+                        return False
+                    _LOGGER.debug(f"BOS API set power to {watt}W successfully")
+                    return True
+
+        except Exception as e:
+            _LOGGER.error(f"BOS API error: {e}")
+            return False
 
     @callback
     def _handle_coordinator_update(self) -> None:
