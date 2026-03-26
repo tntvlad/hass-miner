@@ -55,13 +55,17 @@ Works great in coordination with [ESPHome](https://www.home-assistant.io/integra
 
 ## Installation
 
-Use HACS, add the custom repo https://github.com/tntvlad/hass-miner to it
+### Option 1: Manual HACS Installation
+1. Open HACS in Home Assistant
+2. Click the three dots menu (⋮) in the top right
+3. Select **Custom repositories**
+4. Add `tntvlad/hass-miner` with Category: **Integration**
+5. Click **Add**
+6. Search for "Miner" in HACS and download
 
+### Option 2: One-Click Install
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tntvlad&repository=hass-miner&category=integration)
 
-## Fork Enhancements
-
-- **BOS Power Limit without restart**: Power limit changes on Braiins OS miners now use the REST API, preventing miner restarts
 
 ## Contributions are welcome!
 
