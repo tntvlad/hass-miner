@@ -41,6 +41,9 @@ def _ensure_pyasic():
     
     pyasic = try_import()
     if pyasic:
+        # Apply Whatsminer patch
+        from .patch import apply_whatsminer_patch
+        apply_whatsminer_patch()
         return pyasic
     
     # Need to install/reinstall
@@ -56,6 +59,11 @@ def _ensure_pyasic():
     import pyasic
     if not hasattr(pyasic, 'get_miner'):
         raise ImportError("pyasic module loaded but incomplete")
+    
+    # Apply Whatsminer patch after fresh install
+    from .patch import apply_whatsminer_patch
+    apply_whatsminer_patch()
+    
     return pyasic
 
 

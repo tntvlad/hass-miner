@@ -25,7 +25,11 @@ Works great in coordination with [ESPHome](https://www.home-assistant.io/integra
 This beta branch includes new implementations not yet available in the main branch:
 
 ### Whatsminer M30S
-- **RCP API Support** - Full RCP (Remote Control Protocol) API implementation ([#1](https://github.com/tntvlad/hass-miner/issues/1)) ⚠️ *Not tested*
+- **Power Limit Control** - Fixed power limit slider that was resetting after 2 seconds ([#1](https://github.com/tntvlad/hass-miner/issues/1))
+- **Auto API Enable** - Automatically enables Whatsminer API when "can't access write cmd" error occurs (restores pyasic 0.75.0 behavior)
+- **RPC Password Support** - Configure RPC password during setup for encrypted API commands
+
+> **Note:** If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
 
 ### Avalon Nano 3s
 - **CGMiner API** - Direct CGMiner API communication (port 4028)
@@ -96,6 +100,10 @@ Code template was mainly taken from [@Ludeeus](https://github.com/ludeeus)'s [in
 Miner control and data is handled using [@UpstreamData](https://github.com/UpstreamData)'s [pyasic](https://github.com/UpstreamData/pyasic).
 
 ## Known Issues (Beta)
+
+### Whatsminer M30S
+- **Chip Temperature** - May show "unknown" on some firmware versions (investigating)
+- **Auto API Enable** - Depends on external service `wmt.pyasic.org` - if unavailable, enable API manually via WhatsMinerTool
 
 ### Avalon Nano 3s
 - **LED Brightness** - Brightness slider not working correctly (WRGB format investigation needed)

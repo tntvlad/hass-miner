@@ -1,6 +1,7 @@
-"""Path annoying home assistant dependency handling."""
+"""Patch annoying home assistant dependency handling and fix pyasic issues."""
 from __future__ import annotations
 
+import logging
 import os
 import site
 import sys
@@ -9,6 +10,8 @@ from subprocess import Popen
 
 from homeassistant.util.package import _LOGGER
 from homeassistant.util.package import is_virtual_env
+
+_PATCH_LOGGER = logging.getLogger(__name__)
 
 _UV_ENV_PYTHON_VARS = (
     "UV_SYSTEM_PYTHON",
@@ -88,4 +91,71 @@ def install_package(
             )
             return False
 
+    return True
+
+
+def apply_whatsminer_patch():
+    """Monkey-patch pyasic to fix Whatsminer privileged command issue.
+    
+    In pyasic 0.78.x, the open_api() fallback was disabled/commented out
+    in send_privileged_command(). This patch restores the original behavior
+    from pyasic 0.75.0 which automatically enables the Whatsminer API when
+    a "can't access write cmd" error occurs.
+    """
+    try:
+        from pyasic.rpc.btminer import BTMinerRPCAPI
+        from pyasic.errors import APIError
+    except ImportError:
+        _PATCH_LOGGER.warning("Could not import pyasic.rpc.btminer for patching")
+        return False
+
+    # Check if already patched
+    if hasattr(BTMinerRPCAPI, '_hass_miner_patched'):
+        _PATCH_LOGGER.debug("BTMinerRPCAPI already patched")
+        return True
+
+    # Store reference to the original internal method
+    _original_send_privileged = BTMinerRPCAPI._send_privileged_command
+
+    async def patched_send_privileged_command(
+        self,
+        command: str,
+        ignore_errors: bool = False,
+        timeout: int = 10,
+        **kwargs,
+    ) -> dict:
+        """Patched send_privileged_command with open_api() fallback restored."""
+        try:
+            return await _original_send_privileged(
+                self,
+                command=command,
+                ignore_errors=ignore_errors,
+                timeout=timeout,
+                **kwargs
+            )
+        except APIError as e:
+            if e.message != "can't access write cmd":
+                raise
+            # Restore the open_api() fallback that was removed in pyasic 0.78.x
+            _PATCH_LOGGER.info(
+                "Whatsminer API access denied, attempting to enable API via open_api()"
+            )
+            try:
+                await self.open_api()
+            except Exception as ex:
+                _PATCH_LOGGER.error(f"Failed to open Whatsminer API: {ex}")
+                raise APIError("Failed to open whatsminer API.") from ex
+            # Retry the command after enabling API
+            return await _original_send_privileged(
+                self,
+                command=command,
+                ignore_errors=ignore_errors,
+                timeout=timeout,
+                **kwargs
+            )
+
+    # Apply the patch
+    BTMinerRPCAPI.send_privileged_command = patched_send_privileged_command
+    BTMinerRPCAPI._hass_miner_patched = True
+    _PATCH_LOGGER.info("Applied Whatsminer API patch to BTMinerRPCAPI")
     return True
