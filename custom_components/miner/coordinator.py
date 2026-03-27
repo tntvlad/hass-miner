@@ -49,6 +49,10 @@ DEFAULT_DATA = {
     "fan_sensors": {},
     "config": {},
     "avalon_workmode": None,
+    "avalon_led": None,
+    "avalon_best_share": None,
+    "avalon_found_blocks": None,
+    "avalon_asc_enabled": None,
 }
 
 
@@ -78,6 +82,116 @@ async def _fetch_avalon_workmode(ip: str, timeout: int = 10) -> Optional[int]:
             return int(match.group(1))
     except Exception as e:
         _LOGGER.debug("Failed to fetch Avalon workmode: %s", e)
+    return None
+
+
+async def _fetch_avalon_led_state(ip: str, timeout: int = 10) -> Optional[dict]:
+    """Fetch LED state from Avalon miner via CGMiner API estats command."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 4028),
+            timeout=timeout,
+        )
+        writer.write(b"estats")
+        await writer.drain()
+
+        raw = b""
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            raw += chunk
+
+        writer.close()
+        await writer.wait_closed()
+
+        response = raw.decode("utf-8", errors="ignore")
+
+        # Parse LED data: LED[effect-W-intensity-R-G-B] (WRGB format)
+        # Also check for LEDUser format
+        led_match = re.search(r"LED(?:User)?\[(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-(\d+)\]", response)
+        if led_match:
+            return {
+                "effect": int(led_match.group(1)),
+                "white": int(led_match.group(2)),      # W channel (0-100)
+                "intensity": int(led_match.group(3)),   # Overall intensity (0-100)
+                "r": int(led_match.group(4)),
+                "g": int(led_match.group(5)),
+                "b": int(led_match.group(6)),
+            }
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch Avalon LED state: %s", e)
+    return None
+
+
+async def _fetch_avalon_summary(ip: str, timeout: int = 10) -> Optional[dict]:
+    """Fetch summary data from Avalon miner via CGMiner API."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 4028),
+            timeout=timeout,
+        )
+        writer.write(b"summary")
+        await writer.drain()
+
+        raw = b""
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            raw += chunk
+
+        writer.close()
+        await writer.wait_closed()
+
+        response = raw.decode("utf-8", errors="ignore")
+
+        result = {}
+
+        # Parse Best Share
+        best_share_match = re.search(r"Best Share=(\d+)", response)
+        if best_share_match:
+            result["best_share"] = int(best_share_match.group(1))
+
+        # Parse Found Blocks
+        found_blocks_match = re.search(r"Found Blocks=(\d+)", response)
+        if found_blocks_match:
+            result["found_blocks"] = int(found_blocks_match.group(1))
+
+        return result if result else None
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch Avalon summary: %s", e)
+    return None
+
+
+async def _fetch_avalon_asc_enabled(ip: str, timeout: int = 10) -> Optional[bool]:
+    """Fetch ASC device enabled state from Avalon miner via CGMiner API devs command."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 4028),
+            timeout=timeout,
+        )
+        writer.write(b"devs")
+        await writer.drain()
+
+        raw = b""
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            raw += chunk
+
+        writer.close()
+        await writer.wait_closed()
+
+        response = raw.decode("utf-8", errors="ignore")
+
+        # Parse Enabled field: Enabled=Y or Enabled=N
+        enabled_match = re.search(r"Enabled=([YN])", response)
+        if enabled_match:
+            return enabled_match.group(1) == "Y"
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch Avalon ASC enabled state: %s", e)
     return None
 
 
@@ -286,6 +400,10 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
             },
             "avalon_workmode": None,
+            "avalon_led": None,
+            "avalon_best_share": None,
+            "avalon_found_blocks": None,
+            "avalon_asc_enabled": None,
         }
 
         # Fetch workmode for Avalon Nano miners
@@ -298,5 +416,21 @@ class MinerCoordinator(DataUpdateCoordinator):
                 data["miner_sensors"]["active_preset_name"] = workmode_names.get(
                     workmode, "Unknown"
                 )
+
+            # Fetch LED state
+            led_state = await _fetch_avalon_led_state(self.miner.ip)
+            if led_state:
+                data["avalon_led"] = led_state
+
+            # Fetch summary data (Best Share, Found Blocks)
+            summary = await _fetch_avalon_summary(self.miner.ip)
+            if summary:
+                data["avalon_best_share"] = summary.get("best_share")
+                data["avalon_found_blocks"] = summary.get("found_blocks")
+
+            # Fetch ASC enabled state (for mining switch)
+            asc_enabled = await _fetch_avalon_asc_enabled(self.miner.ip)
+            if asc_enabled is not None:
+                data["avalon_asc_enabled"] = asc_enabled
 
         return data

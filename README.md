@@ -10,6 +10,8 @@
 [![hacs][hacsbadge]][hacs]
 [![Project Maintenance][maintenance-shield]][user_profile]
 
+> **⚠️ BETA BRANCH** - This branch contains experimental features that are not yet merged to main.
+
 > **Note:** This is a fork of the original [Schnitzel/hass-miner](https://github.com/Schnitzel/hass-miner) which is no longer actively maintained. Full credit goes to [@Schnitzel](https://github.com/Schnitzel) and [@b-rowan](https://github.com/b-rowan) for creating this excellent integration.
 
 Control and monitor your Bitcoin Miners from Home Assistant.
@@ -17,6 +19,20 @@ Control and monitor your Bitcoin Miners from Home Assistant.
 Great for Heat Reusage, Solar Mining or any usecase where you don't need your miners running 24/7 or with a specific wattage.
 
 Works great in coordination with [ESPHome](https://www.home-assistant.io/integrations/esphome/) for Sensors (like temperature) and [Grafana](https://github.com/hassio-addons/addon-grafana) for Dashboards.
+
+## Beta Branch Features
+
+This beta branch includes new implementations not yet available in the main branch:
+
+### Whatsminer M30S
+- **RCP API Support** - Full RCP (Remote Control Protocol) API implementation ([#1](https://github.com/tntvlad/hass-miner/issues/1)) ⚠️ *Not tested*
+
+### Avalon Nano 3s
+- **CGMiner API** - Direct CGMiner API communication (port 4028)
+- **Work Mode Control** - Switch between Low/Mid/High mining modes
+- **LED Control** - RGB color picker and effect selection (Stay, Flash, Breathing, Loop)
+- **Mining Stats** - Best Share with auto-scaling (K/M/G/T/P/E/Z), Found Blocks
+- **Difficulty Scaling** - Automatic unit scaling for Best Difficulty values
 
 ### Support for:
 
@@ -78,6 +94,13 @@ This project was generated from [@oncleben31](https://github.com/oncleben31)'s [
 Code template was mainly taken from [@Ludeeus](https://github.com/ludeeus)'s [integration_blueprint][integration_blueprint] template.
 
 Miner control and data is handled using [@UpstreamData](https://github.com/UpstreamData)'s [pyasic](https://github.com/UpstreamData/pyasic).
+
+## Known Issues (Beta)
+
+### Avalon Nano 3s
+- **LED Brightness** - Brightness slider not working correctly (WRGB format investigation needed)
+- **Mining Enable/Disable** - `ascenable`/`ascdisable` command format needs investigation
+- **Restart Function** - Miner restart service not yet implemented
 
 ---
 
