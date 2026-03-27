@@ -26,8 +26,10 @@ This beta branch includes new implementations not yet available in the main bran
 
 ### Whatsminer M30S
 - **Power Limit Control** - Fixed power limit slider that was resetting after 2 seconds ([#1](https://github.com/tntvlad/hass-miner/issues/1))
-- **Auto API Enable** - Automatically enables Whatsminer API when "can't access write cmd" error occurs (restores pyasic 0.75.0 behavior)
+- **Auto API Enable** - Automatically enables Whatsminer API when "can't access write cmd" error occurs
 - **RPC Password Support** - Configure RPC password during setup for encrypted API commands
+
+> **Note:** Using pyasic 0.75.0 for compatibility with Home Assistant's pydantic version and because it includes the working Whatsminer API auto-enable feature.
 
 > **Note:** If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
 
@@ -103,7 +105,6 @@ Miner control and data is handled using [@UpstreamData](https://github.com/Upstr
 
 ### Whatsminer M30S
 - **Chip Temperature** - May show "unknown" on some firmware versions (investigating)
-- **Auto API Enable** - Depends on external service `wmt.pyasic.org` - if unavailable, enable API manually via WhatsMinerTool
 
 ### Avalon Nano 3s
 - **LED Brightness** - Brightness slider not working correctly (WRGB format investigation needed)
