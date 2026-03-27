@@ -1,38 +1,103 @@
-"""Support for Bitcoin ASIC miners."""
+"""Workmode select entity for Avalon miners."""
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING
+import re
+from typing import Optional
 
-if TYPE_CHECKING:
-    import pyasic
-
-from homeassistant.components.number import NumberEntityDescription, NumberDeviceClass
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry
-from homeassistant.helpers import entity
+from homeassistant.core import callback, HomeAssistant
+from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import EntityCategory
-from homeassistant.const import UnitOfPower
 
 from .const import DOMAIN
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-
-NUMBER_DESCRIPTION_KEY_MAP: dict[str, NumberEntityDescription] = {
-    "power_limit": NumberEntityDescription(
-        key="Power Limit",
-        native_unit_of_measurement=UnitOfPower.WATT,
-        device_class=NumberDeviceClass.POWER,
-        entity_category=EntityCategory.CONFIG,
-    )
+# Workmode mapping for Avalon Nano 3s
+WORK_MODES = {
+    "Low": 0,
+    "Mid": 1,
+    "High": 2,
 }
+REVERSE_WORK_MODES = {v: k for k, v in WORK_MODES.items()}
+
+
+class AvalonCGMinerAPI:
+    """CGMiner API client for Avalon miners."""
+
+    def __init__(self, host: str, port: int = 4028, timeout: int = 10):
+        """Initialize the CGMiner API client."""
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+
+    async def _send_command(self, command: str) -> Optional[str]:
+        """Send a command to the CGMiner API and return the response."""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=self.timeout,
+            )
+            writer.write(command.encode("utf-8"))
+            await writer.drain()
+
+            raw = b""
+            while True:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=self.timeout)
+                if not chunk:
+                    break
+                raw += chunk
+
+            writer.close()
+            await writer.wait_closed()
+            return raw.decode("utf-8", errors="ignore").strip()
+        except Exception as e:
+            _LOGGER.error("CGMiner command '%s' failed: %s", command, e)
+            return None
+
+    async def get_workmode(self) -> Optional[int]:
+        """Get current workmode from estats command."""
+        raw = await self._send_command("estats")
+        if not raw:
+            return None
+
+        # Parse WORKMODE[value] from estats response
+        match = re.search(r"WORKMODE\[(\d+)\]", raw)
+        if match:
+            return int(match.group(1))
+        return None
+
+    async def set_workmode(self, level: int) -> bool:
+        """Set workmode using ascset command."""
+        raw = await self._send_command(f"ascset|0,workmode,set,{level}")
+        if not raw:
+            return False
+
+        # Check for success status
+        return "STATUS=S" in raw or "success" in raw.lower()
+
+
+def is_avalon_nano_miner(miner) -> bool:
+    """Check if miner is an Avalon Nano (supports workmode)."""
+    if miner is None:
+        return False
+    
+    miner_class_name = miner.__class__.__name__.lower()
+    model = getattr(miner, "model", "") or ""
+    make = getattr(miner, "make", "") or ""
+    
+    # Check for Avalon Nano models
+    if "avalon" in miner_class_name.lower() or "avalon" in make.lower():
+        if "nano" in model.lower() or "nano" in miner_class_name.lower():
+            return True
+    
+    return False
 
 
 async def async_setup_entry(
@@ -40,36 +105,42 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Add sensors for passed config_entry in HA."""
+    """Add select entities for passed config_entry in HA."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     await coordinator.async_config_entry_first_refresh()
-    if coordinator.miner.supports_autotuning:
-        async_add_entities(
-            [
-                MinerPowerLimitNumber(
-                    coordinator=coordinator,
-                    entity_description=NUMBER_DESCRIPTION_KEY_MAP["power_limit"],
-                )
-            ]
+
+    entities = []
+
+    # Add workmode select for Avalon Nano miners
+    if is_avalon_nano_miner(coordinator.miner):
+        _LOGGER.info(
+            "Detected Avalon Nano miner at %s, adding workmode control",
+            coordinator.data.get("ip"),
         )
+        entities.append(AvalonWorkModeSelect(coordinator))
+
+    if entities:
+        async_add_entities(entities)
 
 
-class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
-    """Defines a Miner Number to set the Power Limit of the Miner."""
+class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
+    """Select entity for Avalon miner workmode (Low/Mid/High)."""
 
-    def __init__(
-        self, coordinator: MinerCoordinator, entity_description: NumberEntityDescription
-    ):
-        """Initialize the PowerLimit entity."""
+    _attr_has_entity_name = True
+    _attr_options = list(WORK_MODES.keys())
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: MinerCoordinator):
+        """Initialize the workmode select entity."""
         super().__init__(coordinator=coordinator)
-        self._attr_native_value = self.coordinator.data["miner_sensors"]["power_limit"]
-        self.entity_description = entity_description
+        self._api = AvalonCGMinerAPI(coordinator.data["ip"])
+        self._current_mode: Optional[str] = None
 
     @property
     def name(self) -> str | None:
         """Return name of the entity."""
-        return f"{self.coordinator.config_entry.title} Power Limit"
+        return f"{self.coordinator.config_entry.title} Work Mode"
 
     @property
     def device_info(self) -> entity.DeviceInfo:
@@ -90,58 +161,54 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.data['mac']}-power_limit"
+        return f"{self.coordinator.data['mac']}-workmode"
 
     @property
-    def native_min_value(self) -> float | None:
-        """Return device minimum value."""
-        return self.coordinator.data["power_limit_range"]["min"]
+    def current_option(self) -> str | None:
+        """Return current workmode."""
+        # Try to get from coordinator data first
+        workmode = self.coordinator.data.get("avalon_workmode")
+        if workmode is not None:
+            return REVERSE_WORK_MODES.get(workmode, "Low")
+        return self._current_mode or "Low"
 
-    @property
-    def native_max_value(self) -> float | None:
-        """Return device maximum value."""
-        return self.coordinator.data["power_limit_range"]["max"]
+    async def async_select_option(self, option: str) -> None:
+        """Change the workmode."""
+        level = WORK_MODES.get(option)
+        if level is None:
+            _LOGGER.warning("Unknown workmode: %s", option)
+            return
 
-    @property
-    def native_step(self) -> float | None:
-        """Return device increment step."""
-        return 100
-
-    @property
-    def native_unit_of_measurement(self):
-        """Return device unit of measurement."""
-        return "W"
-
-    async def async_set_native_value(self, value):
-        """Update the current value."""
-        import pyasic  # lazy import to avoid blocking event loop
-
-        miner = self.coordinator.miner
-
-        _LOGGER.debug(
-            f"{self.coordinator.config_entry.title}: setting power limit to {value}."
+        _LOGGER.info(
+            "%s: Setting workmode to %s (level %d)",
+            self.coordinator.config_entry.title,
+            option,
+            level,
         )
 
-        if not miner.supports_autotuning:
-            raise TypeError(
-                f"{self.coordinator.config_entry.title}: Tuning not supported."
-            )
+        success = await self._api.set_workmode(level)
+        if success:
+            self._current_mode = option
+            self.async_write_ha_state()
+            # Request coordinator refresh to update other entities
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set workmode to %s", option)
 
-        result = await miner.set_power_limit(int(value))
-
-        if not result:
-            raise pyasic.APIError("Failed to set wattage.")
-
-        self._attr_native_value = value
-        self.async_write_ha_state()
+    async def async_added_to_hass(self) -> None:
+        """Fetch initial workmode when entity is added."""
+        await super().async_added_to_hass()
+        workmode = await self._api.get_workmode()
+        if workmode is not None:
+            self._current_mode = REVERSE_WORK_MODES.get(workmode, "Low")
+            self.async_write_ha_state()
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        if self.coordinator.data["miner_sensors"]["power_limit"] is not None:
-            self._attr_native_value = self.coordinator.data["miner_sensors"][
-                "power_limit"
-            ]
-
+        """Handle updated data from the coordinator."""
+        workmode = self.coordinator.data.get("avalon_workmode")
+        if workmode is not None:
+            self._current_mode = REVERSE_WORK_MODES.get(workmode, "Low")
         super()._handle_coordinator_update()
 
     @property

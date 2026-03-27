@@ -1,7 +1,9 @@
 """Miner DataUpdateCoordinator."""
+import asyncio
 import logging
+import re
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     import pyasic
@@ -46,7 +48,52 @@ DEFAULT_DATA = {
     "board_sensors": {},
     "fan_sensors": {},
     "config": {},
+    "avalon_workmode": None,
 }
+
+
+async def _fetch_avalon_workmode(ip: str, timeout: int = 10) -> Optional[int]:
+    """Fetch workmode from Avalon miner via CGMiner API."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 4028),
+            timeout=timeout,
+        )
+        writer.write(b"estats")
+        await writer.drain()
+
+        raw = b""
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            raw += chunk
+
+        writer.close()
+        await writer.wait_closed()
+
+        response = raw.decode("utf-8", errors="ignore")
+        match = re.search(r"WORKMODE\[(\d+)\]", response)
+        if match:
+            return int(match.group(1))
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch Avalon workmode: %s", e)
+    return None
+
+
+def _is_avalon_nano_miner(miner) -> bool:
+    """Check if miner is an Avalon Nano."""
+    if miner is None:
+        return False
+
+    miner_class_name = miner.__class__.__name__.lower()
+    model = str(getattr(miner, "model", "") or "").lower()
+    make = str(getattr(miner, "make", "") or "").lower()
+
+    if "avalon" in miner_class_name or "avalon" in make:
+        if "nano" in model or "nano" in miner_class_name:
+            return True
+    return False
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -238,5 +285,18 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
                 "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
             },
+            "avalon_workmode": None,
         }
+
+        # Fetch workmode for Avalon Nano miners
+        if _is_avalon_nano_miner(self.miner):
+            workmode = await _fetch_avalon_workmode(self.miner.ip)
+            data["avalon_workmode"] = workmode
+            # Also update active_preset_name for sensor display
+            if workmode is not None:
+                workmode_names = {0: "Low", 1: "Mid", 2: "High"}
+                data["miner_sensors"]["active_preset_name"] = workmode_names.get(
+                    workmode, "Unknown"
+                )
+
         return data

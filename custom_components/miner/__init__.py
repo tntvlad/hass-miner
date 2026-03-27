@@ -16,7 +16,7 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
     Platform.NUMBER,
-    # Platform.SELECT,  # TODO: select.py needs proper implementation
+    Platform.SELECT,
 ]
 
 
