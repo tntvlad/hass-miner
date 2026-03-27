@@ -128,10 +128,16 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
                 f"{self.coordinator.config_entry.title}: Tuning not supported."
             )
 
-        # Check if this is a BOS miner - use REST API to avoid restart
+        # Check miner type and use appropriate API
         miner_class_name = miner.__class__.__name__
+        _LOGGER.debug(f"Miner class: {miner_class_name}")
+        
         if "BOSer" in miner_class_name or "BOS" in miner_class_name:
+            # BOS miners - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))
+        elif "Whatsminer" in miner_class_name or "BTMiner" in miner_class_name:
+            # Whatsminer - use direct RPC to avoid pyasic version detection issues
+            result = await self._set_power_via_whatsminer_rpc(int(value))
         else:
             result = await miner.set_power_limit(int(value))
 
@@ -140,6 +146,45 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
         self._attr_native_value = value
         self.async_write_ha_state()
+
+    async def _set_power_via_whatsminer_rpc(self, wattage: int) -> bool:
+        """Set power limit using Whatsminer RPC (adjust_power_limit command).
+        
+        This bypasses pyasic's BTMinerV2/V3 version detection which can cause
+        issues when the wrong API version is selected for the firmware.
+        """
+        miner = self.coordinator.miner
+        
+        try:
+            # Try using pyasic's RPC directly with adjust_power_limit (legacy V2 command)
+            # This works on most Whatsminer firmware versions
+            try:
+                data = await miner.rpc.adjust_power_limit(wattage)
+                if data and data.get("Msg") == "API command OK":
+                    _LOGGER.debug(f"Whatsminer RPC adjust_power_limit to {wattage}W succeeded")
+                    return True
+                elif data and data.get("Code") == 131:
+                    _LOGGER.debug(f"Whatsminer RPC adjust_power_limit to {wattage}W succeeded (Code 131)")
+                    return True
+            except Exception as e:
+                _LOGGER.debug(f"adjust_power_limit attempt: {e}")
+            
+            # If adjust_power_limit fails, try set_miner_power_limit (V3 command)
+            if hasattr(miner.rpc, 'set_miner_power_limit'):
+                try:
+                    await miner.rpc.set_miner_power_limit(wattage)
+                    _LOGGER.debug(f"Whatsminer RPC set_miner_power_limit to {wattage}W succeeded")
+                    return True
+                except Exception as e:
+                    _LOGGER.debug(f"set_miner_power_limit attempt: {e}")
+            
+            # Fall back to pyasic's set_power_limit as last resort
+            _LOGGER.debug("Falling back to pyasic set_power_limit")
+            return await miner.set_power_limit(wattage)
+            
+        except Exception as e:
+            _LOGGER.error(f"Whatsminer RPC error: {e}")
+            return False
 
     async def _set_power_via_bos_api(self, watt: int) -> bool:
         """Set power target using BOS REST API (doesn't restart miner)."""
