@@ -31,6 +31,8 @@ This beta branch includes new implementations not yet available in the main bran
 
 > **Note:** Using pyasic 0.75.0 for compatibility with Home Assistant's pydantic version and because it includes the working Whatsminer API auto-enable feature.
 
+> **Note:** Includes Python 3.14 compatibility patch for pydantic/pyasic interaction.
+
 > **Note:** If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
 
 ### Avalon Nano 3s
