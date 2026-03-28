@@ -40,6 +40,20 @@
       "already_configured": "[%key:common::config_flow::abort::already_configured%]"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Miner Options",
+        "description": "Configure options for your miner.",
+        "data": {
+          "avalon_control_mode": "Avalon Control Mode"
+        },
+        "data_description": {
+          "avalon_control_mode": "Simple: Basic monitoring via pyasic. Full: Advanced control via CGMiner API (workmode, LED effects, mining switch). Only affects Avalon miners."
+        }
+      }
+    }
+  },
   "services": {
     "reboot": {
       "name": "Reboot miner",

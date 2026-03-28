@@ -115,6 +115,11 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data = {}
         self._miner = None
 
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return MinerOptionsFlowHandler(config_entry)
+
     async def async_step_user(self, user_input=None):
         """Get miner IP and check if it is available."""
         if user_input is None:
@@ -305,3 +310,46 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_devices_found")
 
         return await self.async_step_user()
+
+
+class MinerOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Miner integration."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            # Update config entry data with new options
+            new_data = {**self.config_entry.data, **user_input}
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data
+            )
+            return self.async_create_entry(title="", data={})
+
+        # Get current values
+        current_mode = self.config_entry.data.get(
+            CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
+        )
+
+        # Build options schema
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_AVALON_CONTROL_MODE,
+                    default=current_mode,
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": AVALON_MODE_SIMPLE, "label": "Simple (pyasic only)"},
+                            {"value": AVALON_MODE_FULL, "label": "Full (CGMiner API control)"},
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=data_schema)
