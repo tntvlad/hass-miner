@@ -142,3 +142,61 @@ def apply_pydantic_property_patch():
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply pydantic property patch: {e}")
         return False
+
+
+def apply_avalon_nano3s_patch():
+    """Patch pyasic's CGMinerAvalonNano3s to fix MAC address retrieval.
+    
+    The Nano 3s class is missing:
+    1. _web_cls = AvalonMinerWebAPI (no web API support)
+    2. _get_mac method with web fallbacks (tries RPC which doesn't work)
+    
+    This mirrors the working implementation from CGMinerAvalonNano3.
+    """
+    try:
+        from pyasic import APIError
+        from pyasic.miners.avalonminer.cgminer.nano import CGMinerAvalonNano3s
+        from pyasic.web.avalonminer import AvalonMinerWebAPI
+        
+        # Check if already patched
+        if hasattr(CGMinerAvalonNano3s, '_hass_nano3s_patched'):
+            _PATCH_LOGGER.debug("CGMinerAvalonNano3s already patched")
+            return True
+        
+        # Add web API class (missing from Nano 3s)
+        CGMinerAvalonNano3s._web_cls = AvalonMinerWebAPI
+        
+        # Add _get_mac method with web fallbacks (copied from Nano 3)
+        async def _get_mac(self, web_minerinfo=None, rpc_version=None):
+            """Get MAC address from web API with fallbacks."""
+            if web_minerinfo is None:
+                try:
+                    # Try get_miner_info first (with underscore)
+                    web_minerinfo = await self.web.miner_info()
+                except APIError:
+                    try:
+                        # Fallback to get_minerinfo
+                        web_minerinfo = await self.web.minerinfo()
+                    except APIError:
+                        return None
+            
+            if web_minerinfo is not None:
+                try:
+                    mac = web_minerinfo.get("mac")
+                    if mac is not None:
+                        return mac.upper()
+                except (KeyError, ValueError):
+                    pass
+            return None
+        
+        CGMinerAvalonNano3s._get_mac = _get_mac
+        CGMinerAvalonNano3s._hass_nano3s_patched = True
+        _PATCH_LOGGER.info("Applied Avalon Nano 3s patch for MAC address retrieval")
+        return True
+        
+    except ImportError as e:
+        _PATCH_LOGGER.debug(f"pyasic not loaded yet, skipping Nano 3s patch: {e}")
+        return False
+    except Exception as e:
+        _PATCH_LOGGER.warning(f"Failed to apply Avalon Nano 3s patch: {e}")
+        return False

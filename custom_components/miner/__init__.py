@@ -45,6 +45,9 @@ def _ensure_pyasic():
     
     pyasic = try_import()
     if pyasic:
+        # Apply Avalon Nano 3s patch after pyasic is loaded
+        from .patch import apply_avalon_nano3s_patch
+        apply_avalon_nano3s_patch()
         return pyasic
     
     # Need to install/reinstall
@@ -60,6 +63,10 @@ def _ensure_pyasic():
     import pyasic
     if not hasattr(pyasic, 'get_miner'):
         raise ImportError("pyasic module loaded but incomplete")
+    
+    # Apply Avalon Nano 3s patch after pyasic is loaded
+    from .patch import apply_avalon_nano3s_patch
+    apply_avalon_nano3s_patch()
     
     return pyasic
 
