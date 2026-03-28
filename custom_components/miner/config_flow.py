@@ -16,6 +16,10 @@ def _ensure_pyasic():
     if pyasic is not None:
         return
     
+    # Apply Python 3.14 compatibility patch BEFORE importing pyasic
+    from .patch import apply_pydantic_property_patch
+    apply_pydantic_property_patch()
+    
     try:
         import pyasic as _pyasic
         if version("pyasic") != PYASIC_VERSION:

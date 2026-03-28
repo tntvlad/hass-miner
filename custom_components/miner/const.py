@@ -21,9 +21,10 @@ SERVICE_REBOOT = "reboot"
 SERVICE_RESTART_BACKEND = "restart_backend"
 SERVICE_SET_WORK_MODE = "set_work_mode"
 
-# pyasic 0.78.8 - works with Avalon Nano 3s
+# pyasic 0.78.0 - works with Avalon Nano 3s and pydantic>=2.11.0 (compatible with HA)
 # Note: Whatsminer users may need to manually enable API via WhatsMinerTool
-PYASIC_VERSION = "0.78.8"
+# Python 3.14 requires pydantic patch (applied in patch.py)
+PYASIC_VERSION = "0.78.0"
 
 TERA_HASH_PER_SECOND = "TH/s"
 JOULES_PER_TERA_HASH = "J/TH"
