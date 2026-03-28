@@ -26,10 +26,6 @@ def _ensure_pyasic():
     """Ensure pyasic is installed and imported (runs in executor)."""
     import importlib
     
-    # Apply Python 3.14 compatibility patch BEFORE importing pyasic
-    from .patch import apply_pydantic_property_patch
-    apply_pydantic_property_patch()
-    
     def try_import():
         try:
             from importlib.metadata import version
@@ -45,9 +41,6 @@ def _ensure_pyasic():
     
     pyasic = try_import()
     if pyasic:
-        # Apply Whatsminer patch
-        from .patch import apply_whatsminer_patch
-        apply_whatsminer_patch()
         return pyasic
     
     # Need to install/reinstall
@@ -63,10 +56,6 @@ def _ensure_pyasic():
     import pyasic
     if not hasattr(pyasic, 'get_miner'):
         raise ImportError("pyasic module loaded but incomplete")
-    
-    # Apply Whatsminer patch after fresh install
-    from .patch import apply_whatsminer_patch
-    apply_whatsminer_patch()
     
     return pyasic
 
