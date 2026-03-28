@@ -353,13 +353,29 @@ class MinerCoordinator(DataUpdateCoordinator):
         # Success: reset the failure count
         self._failure_count = 0
 
+        def normalize_hashrate_to_th(value):
+            """Normalize hashrate to TH/s.
+            
+            pyasic may return hashrate in different units (H/s, GH/s, TH/s).
+            If the value is unreasonably high (>1 million), assume it's in H/s
+            and convert to TH/s by dividing by 10^12.
+            """
+            if value is None:
+                return None
+            value = float(value)
+            # If hashrate > 1 million TH/s, it's clearly in wrong unit (H/s)
+            if value > 1_000_000:
+                # Convert H/s to TH/s
+                value = value / 1_000_000_000_000
+            return round(value, 2)
+
         try:
-            hashrate = round(float(miner_data.hashrate), 2)
+            hashrate = normalize_hashrate_to_th(miner_data.hashrate)
         except TypeError:
             hashrate = None
 
         try:
-            expected_hashrate = round(float(miner_data.expected_hashrate), 2)
+            expected_hashrate = normalize_hashrate_to_th(miner_data.expected_hashrate)
         except TypeError:
             expected_hashrate = None
 

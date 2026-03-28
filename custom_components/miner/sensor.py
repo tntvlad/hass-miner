@@ -188,7 +188,11 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     sensors = []
+    is_avalon = _is_avalon_nano_miner(coordinator.miner)
     for s in coordinator.data["miner_sensors"]:
+        # Only show active_preset_name for Avalon Nano miners (workmode)
+        if s == "active_preset_name" and not is_avalon:
+            continue
         sensors.append(_create_miner_entity(s))
     for board in range(coordinator.miner.expected_hashboards or 3):
         for s in ["board_temperature", "chip_temperature", "board_hashrate"]:
