@@ -11,6 +11,11 @@ CONF_WEB_PASSWORD = "web_password"
 CONF_WEB_USERNAME = "web_username"
 CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
+CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
+
+# Avalon control mode options
+AVALON_MODE_SIMPLE = "simple"  # Native pyasic only
+AVALON_MODE_FULL = "full"      # Full CGMiner API control (workmode, LED, mining switch)
 
 SERVICE_REBOOT = "reboot"
 SERVICE_RESTART_BACKEND = "restart_backend"

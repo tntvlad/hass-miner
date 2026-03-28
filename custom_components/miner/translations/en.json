@@ -22,6 +22,16 @@
         "data": {
           "title": "Device Name"
         }
+      },
+      "avalon_options": {
+        "title": "Avalon Miner Options",
+        "description": "Choose the control mode for your Avalon miner.",
+        "data": {
+          "avalon_control_mode": "Control Mode"
+        },
+        "data_description": {
+          "avalon_control_mode": "Simple: Basic monitoring via pyasic. Full: Advanced control via CGMiner API (workmode, LED effects, mining switch)."
+        }
       }
     },
     "abort": {

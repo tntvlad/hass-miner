@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import EntityCategory
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -188,10 +188,13 @@ async def async_setup_entry(
 
     entities = []
 
-    # Add workmode and LED effect select for Avalon Nano miners
-    if is_avalon_nano_miner(coordinator.miner):
+    # Check if user wants full CGMiner control for Avalon miners
+    avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
+    
+    # Add workmode and LED effect select for Avalon Nano miners (only in full mode)
+    if is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
         _LOGGER.info(
-            "Detected Avalon Nano miner at %s, adding workmode and LED controls",
+            "Detected Avalon Nano miner at %s, adding workmode and LED controls (full mode)",
             coordinator.data.get("ip"),
         )
         entities.append(AvalonWorkModeSelect(coordinator))

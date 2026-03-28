@@ -22,6 +22,8 @@ from .const import CONF_SSH_PASSWORD
 from .const import CONF_SSH_USERNAME
 from .const import CONF_WEB_PASSWORD
 from .const import CONF_WEB_USERNAME
+from .const import CONF_AVALON_CONTROL_MODE
+from .const import AVALON_MODE_FULL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +55,6 @@ DEFAULT_DATA = {
     "avalon_best_share": None,
     "avalon_found_blocks": None,
     "avalon_asc_enabled": None,
-    "whatsminer_summary": None,
 }
 
 
@@ -209,79 +210,6 @@ def _is_avalon_nano_miner(miner) -> bool:
         if "nano" in model or "nano" in miner_class_name:
             return True
     return False
-
-
-def _is_whatsminer(miner) -> bool:
-    """Check if miner is a Whatsminer."""
-    if miner is None:
-        return False
-
-    miner_class_name = miner.__class__.__name__.lower()
-    model = str(getattr(miner, "model", "") or "").lower()
-    make = str(getattr(miner, "make", "") or "").lower()
-
-    return (
-        "whatsminer" in miner_class_name or
-        "btminer" in miner_class_name or
-        "whatsminer" in make or
-        model.startswith("m3") or
-        model.startswith("m5")
-    )
-
-
-async def _fetch_whatsminer_summary(ip: str, timeout: int = 10) -> Optional[dict]:
-    """Fetch summary data from Whatsminer via direct API (readable, no encryption).
-    
-    Returns chip temperatures and other data from the summary command.
-    """
-    import json
-    try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, 4028),
-            timeout=timeout,
-        )
-        writer.write(b'{"cmd":"summary"}')
-        await writer.drain()
-
-        raw = b""
-        while True:
-            try:
-                chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
-                if not chunk:
-                    break
-                raw += chunk
-                # Check for complete JSON
-                try:
-                    json.loads(raw.decode("utf-8", errors="ignore"))
-                    break
-                except json.JSONDecodeError:
-                    continue
-            except asyncio.TimeoutError:
-                break
-
-        writer.close()
-        await writer.wait_closed()
-
-        response = raw.decode("utf-8", errors="ignore").strip()
-        data = json.loads(response)
-        
-        # Extract Msg which contains the summary data
-        msg = data.get("Msg", data)
-        if isinstance(msg, dict):
-            return {
-                "chip_temp_min": msg.get("Chip Temp Min"),
-                "chip_temp_max": msg.get("Chip Temp Max"),
-                "chip_temp_avg": msg.get("Chip Temp Avg"),
-                "env_temp": msg.get("Env Temp"),
-                "power": msg.get("Power"),
-                "power_limit": msg.get("Power Limit"),
-                "power_mode": msg.get("Power Mode"),
-                "fan_speed_in": msg.get("Fan Speed In"),
-                "fan_speed_out": msg.get("Fan Speed Out"),
-            }
-    except Exception as e:
-        _LOGGER.debug("Failed to fetch Whatsminer summary: %s", e)
-    return None
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -478,11 +406,11 @@ class MinerCoordinator(DataUpdateCoordinator):
             "avalon_best_share": None,
             "avalon_found_blocks": None,
             "avalon_asc_enabled": None,
-            "whatsminer_summary": None,
         }
 
-        # Fetch workmode for Avalon Nano miners
-        if _is_avalon_nano_miner(self.miner):
+        # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
+        avalon_mode = self.config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
+        if _is_avalon_nano_miner(self.miner) and avalon_mode == AVALON_MODE_FULL:
             workmode = await _fetch_avalon_workmode(self.miner.ip)
             data["avalon_workmode"] = workmode
             # Also update active_preset_name for sensor display
@@ -507,25 +435,5 @@ class MinerCoordinator(DataUpdateCoordinator):
             asc_enabled = await _fetch_avalon_asc_enabled(self.miner.ip)
             if asc_enabled is not None:
                 data["avalon_asc_enabled"] = asc_enabled
-
-        # Fetch additional data for Whatsminer
-        if _is_whatsminer(self.miner):
-            wm_summary = await _fetch_whatsminer_summary(self.miner.ip)
-            if wm_summary:
-                data["whatsminer_summary"] = wm_summary
-                
-                # Update chip temperature in board_sensors if pyasic didn't get it
-                # Whatsminer API provides Chip Temp Avg which we can use
-                chip_temp = wm_summary.get("chip_temp_avg")
-                if chip_temp is not None:
-                    for slot in data["board_sensors"]:
-                        if data["board_sensors"][slot].get("chip_temperature") is None:
-                            data["board_sensors"][slot]["chip_temperature"] = chip_temp
-                
-                # Update power limit if not set
-                if data["miner_sensors"]["power_limit"] in (None, 0):
-                    power_limit = wm_summary.get("power_limit")
-                    if power_limit:
-                        data["miner_sensors"]["power_limit"] = power_limit
 
         return data

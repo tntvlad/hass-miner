@@ -37,6 +37,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.selector import TextSelector
 from homeassistant.helpers.selector import TextSelectorConfig
 from homeassistant.helpers.selector import TextSelectorType
+from homeassistant.helpers.selector import SelectSelector
+from homeassistant.helpers.selector import SelectSelectorConfig
+from homeassistant.helpers.selector import SelectSelectorMode
 
 from .const import CONF_IP
 from .const import CONF_MIN_POWER
@@ -47,6 +50,9 @@ from .const import CONF_SSH_USERNAME
 from .const import CONF_TITLE
 from .const import CONF_WEB_PASSWORD
 from .const import CONF_WEB_USERNAME
+from .const import CONF_AVALON_CONTROL_MODE
+from .const import AVALON_MODE_SIMPLE
+from .const import AVALON_MODE_FULL
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,6 +87,18 @@ async def validate_ip_input(
         return {"base": "Unable to connect to Miner, is IP correct?"}, None
 
     return {}, miner
+
+
+def _is_avalon_miner(miner) -> bool:
+    """Check if miner is an Avalon miner."""
+    if miner is None:
+        return False
+    
+    miner_class_name = miner.__class__.__name__.lower()
+    make = str(getattr(miner, "make", "") or "").lower()
+    model = str(getattr(miner, "model", "") or "").lower()
+    
+    return "avalon" in miner_class_name or "avalon" in make or "avalon" in model
 
 
 class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -198,8 +216,43 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(schema_data)
         if not user_input:
             if len(schema_data) == 0:
+                # No credentials needed, check if Avalon miner
+                if _is_avalon_miner(self._miner):
+                    return await self.async_step_avalon_options()
                 return await self.async_step_title()
             return self.async_show_form(step_id="login", data_schema=schema)
+
+        self._data.update(user_input)
+        
+        # Check if Avalon miner to show options
+        if _is_avalon_miner(self._miner):
+            return await self.async_step_avalon_options()
+        return await self.async_step_title()
+
+    async def async_step_avalon_options(self, user_input=None):
+        """Get Avalon miner control options."""
+        if user_input is None:
+            user_input = {}
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_AVALON_CONTROL_MODE,
+                    default=user_input.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": AVALON_MODE_SIMPLE, "label": "Simple (pyasic only)"},
+                            {"value": AVALON_MODE_FULL, "label": "Full (CGMiner API control)"},
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
+        if not user_input:
+            return self.async_show_form(step_id="avalon_options", data_schema=data_schema)
 
         self._data.update(user_input)
         return await self.async_step_title()

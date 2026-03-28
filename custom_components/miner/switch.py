@@ -12,7 +12,7 @@ from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
 from .coordinator import MinerCoordinator, _is_avalon_nano_miner
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,8 +40,11 @@ async def async_setup_entry(
     if coordinator.miner.supports_shutdown:
         entities.append(MinerActiveSwitch(coordinator=coordinator))
     
-    # Avalon Nano 3s mining switch (uses CGMiner API)
-    if _is_avalon_nano_miner(coordinator.miner):
+    # Check if user wants full CGMiner control for Avalon miners
+    avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
+    
+    # Avalon Nano 3s mining switch (uses CGMiner API) - only in full mode
+    if _is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
         entities.append(AvalonMiningSwitch(coordinator=coordinator))
     
     if entities:
