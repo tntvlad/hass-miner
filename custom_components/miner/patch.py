@@ -144,6 +144,47 @@ def apply_pydantic_property_patch():
         return False
 
 
+def apply_avalonminer_web_patch():
+    """Patch AvalonMinerWebAPI._handle_multicommand to catch JSONDecodeError.
+
+    In pyasic 0.78.0, _handle_multicommand only catches httpx.HTTPError but
+    not json.JSONDecodeError (unlike send_command which catches both).  When
+    Avalon Nano 3s miners return an empty web response, json.loads("") raises
+    JSONDecodeError which crashes the entire get_data() call and prevents all
+    entities from loading.
+    """
+    try:
+        import json
+        from pyasic.web.avalonminer import AvalonMinerWebAPI
+
+        if hasattr(AvalonMinerWebAPI, '_hass_web_patched'):
+            _PATCH_LOGGER.debug("AvalonMiner web API already patched")
+            return True
+
+        original_handle = AvalonMinerWebAPI._handle_multicommand
+
+        async def patched_handle_multicommand(self, client, command):
+            try:
+                return await original_handle(self, client, command)
+            except json.JSONDecodeError:
+                _PATCH_LOGGER.debug(
+                    f"AvalonMiner {self.ip}: ignoring JSONDecodeError "
+                    f"for command '{command}'"
+                )
+                return {}
+
+        AvalonMinerWebAPI._handle_multicommand = patched_handle_multicommand
+        AvalonMinerWebAPI._hass_web_patched = True
+        _PATCH_LOGGER.info(
+            "Applied AvalonMiner web API patch (JSONDecodeError handling)"
+        )
+        return True
+
+    except Exception as e:
+        _PATCH_LOGGER.warning(f"Failed to apply AvalonMiner web patch: {e}")
+        return False
+
+
 def apply_whatsminer_power_limit_patch():
     """Restore the open_api + retry logic for Whatsminer privileged commands.
 

@@ -21,3 +21,6 @@ config/*
 
 # Downloaded pyasic source for analysis
 pyasic/
+
+# Log files
+logs/

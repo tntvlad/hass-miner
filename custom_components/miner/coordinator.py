@@ -272,9 +272,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         if miner is None:
             self._failure_count += 1
 
-            if self._failure_count == 1:
+            if self._failure_count <= 3:
                 _LOGGER.warning(
-                    "Miner is offline – returning zeroed data (first failure)."
+                    f"Miner is offline – returning zeroed data (failure {self._failure_count}/3)."
                 )
                 return {
                     **DEFAULT_DATA,
@@ -317,9 +317,9 @@ class MinerCoordinator(DataUpdateCoordinator):
                     miner_data = await self.miner.get_data(include=data_options)
                 except Exception as retry_err:
                     self._failure_count += 1
-                    if self._failure_count == 1:
+                    if self._failure_count <= 3:
                         _LOGGER.warning(
-                            f"Error fetching miner data: {retry_err} – returning zeroed data (first failure)."
+                            f"Error fetching miner data: {retry_err} – returning zeroed data (failure {self._failure_count}/3)."
                         )
                         return {
                             **DEFAULT_DATA,
@@ -333,9 +333,9 @@ class MinerCoordinator(DataUpdateCoordinator):
             else:
                 self._failure_count += 1
 
-                if self._failure_count == 1:
+                if self._failure_count <= 3:
                     _LOGGER.warning(
-                        f"Error fetching miner data: {err} – returning zeroed data (first failure)."
+                        f"Error fetching miner data: {err} – returning zeroed data (failure {self._failure_count}/3)."
                     )
                     return {
                         **DEFAULT_DATA,
