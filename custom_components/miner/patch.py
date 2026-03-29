@@ -142,3 +142,57 @@ def apply_pydantic_property_patch():
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply pydantic property patch: {e}")
         return False
+
+
+def apply_whatsminer_power_limit_patch():
+    """Restore the open_api + retry logic for Whatsminer privileged commands.
+
+    In pyasic 0.78.0, the retry logic in BTMinerRPCAPI.send_privileged_command
+    was commented out. When adjust_power_limit (or any privileged command)
+    receives "can't access write cmd", the v0.75.0 code would call open_api()
+    to unlock the API and retry. Without this, set_power_limit silently fails
+    and the HA slider resets to the old value on the next coordinator update.
+    """
+    try:
+        from pyasic.rpc.btminer import BTMinerRPCAPI
+        from pyasic.errors import APIError
+
+        if hasattr(BTMinerRPCAPI, '_hass_power_limit_patched'):
+            _PATCH_LOGGER.debug("Whatsminer power limit already patched")
+            return True
+
+        original_send = BTMinerRPCAPI.send_privileged_command
+
+        async def patched_send_privileged_command(
+            self, command, ignore_errors=False, timeout=10, **kwargs
+        ):
+            try:
+                return await original_send(
+                    self, command, ignore_errors=ignore_errors,
+                    timeout=timeout, **kwargs
+                )
+            except APIError as e:
+                if not getattr(e, 'message', str(e)) == "can't access write cmd":
+                    raise
+                # Restore v0.75.0 behavior: open API and retry
+                _PATCH_LOGGER.info(
+                    f"Whatsminer {self.ip}: got 'can't access write cmd', "
+                    "attempting open_api + retry"
+                )
+                try:
+                    await self.open_api()
+                except Exception as oe:
+                    raise APIError("Failed to open whatsminer API.") from oe
+                return await original_send(
+                    self, command, ignore_errors=ignore_errors,
+                    timeout=timeout, **kwargs
+                )
+
+        BTMinerRPCAPI.send_privileged_command = patched_send_privileged_command
+        BTMinerRPCAPI._hass_power_limit_patched = True
+        _PATCH_LOGGER.info("Applied Whatsminer power limit patch (open_api retry)")
+        return True
+
+    except Exception as e:
+        _PATCH_LOGGER.warning(f"Failed to apply Whatsminer power limit patch: {e}")
+        return False

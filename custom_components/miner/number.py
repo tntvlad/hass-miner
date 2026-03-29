@@ -64,8 +64,12 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
     ):
         """Initialize the PowerLimit entity."""
         super().__init__(coordinator=coordinator)
-        self._attr_native_value = self.coordinator.data["miner_sensors"]["power_limit"]
         self.entity_description = entity_description
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current power limit from coordinator data."""
+        return self.coordinator.data["miner_sensors"]["power_limit"]
 
     @property
     def name(self) -> str | None:
@@ -142,8 +146,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         if not result:
             raise pyasic.APIError("Failed to set wattage.")
 
-        self._attr_native_value = value
-        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
     async def _set_power_via_bos_api(self, watt: int) -> bool:
         """Set power target using BOS REST API (doesn't restart miner)."""
