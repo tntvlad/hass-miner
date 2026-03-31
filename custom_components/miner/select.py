@@ -253,20 +253,59 @@ class VNishAPI:
             _LOGGER.error("VNish get_settings error: %s", e)
             return {}
 
-    async def apply_preset(self, session: aiohttp.ClientSession, preset_name: str, current_settings: dict) -> bool:
+    async def apply_preset(
+        self,
+        session: aiohttp.ClientSession,
+        preset_name: str,
+        current_settings: dict,
+        target_tune_settings: dict | None = None,
+    ) -> bool:
         """Apply a preset by updating settings.
 
-        Only sends the miner.overclock section (matching pyasic behavior).
+        Sends the full miner.overclock section with the new preset name
+        and the target preset's tune_settings values for globals/chains,
+        matching the VNish web UI behavior.
         Always restarts mining after applying.
         """
         try:
-            overclock = current_settings["miner"]["overclock"].copy()
+            overclock = current_settings["miner"]["overclock"]
         except KeyError:
             _LOGGER.error("VNish settings missing miner.overclock path")
             return False
 
-        overclock["preset"] = preset_name
-        payload = {"miner": {"overclock": overclock}}
+        old_preset = overclock.get("preset")
+        new_overclock = {**overclock, "preset": preset_name}
+
+        # Apply the target preset's tune_settings to globals and chains
+        if target_tune_settings:
+            tune_freq = target_tune_settings.get("freq")
+            tune_volt = target_tune_settings.get("volt")
+            if tune_freq is not None or tune_volt is not None:
+                globals_section = dict(new_overclock.get("globals", {}))
+                if tune_freq is not None:
+                    globals_section["freq"] = tune_freq
+                if tune_volt is not None:
+                    # tune_settings volt is 10x the globals value (mV vs deciV)
+                    globals_section["volt"] = tune_volt // 10
+                new_overclock["globals"] = globals_section
+
+            tune_chains = target_tune_settings.get("chains", [])
+            current_chains = new_overclock.get("chains", [])
+            if tune_chains and current_chains:
+                updated_chains = []
+                for i, chain in enumerate(current_chains):
+                    chain = dict(chain)
+                    if i < len(tune_chains):
+                        chain["freq"] = tune_chains[i].get("freq", chain.get("freq"))
+                        chain["chips"] = tune_chains[i].get("chips", chain.get("chips"))
+                    updated_chains.append(chain)
+                new_overclock["chains"] = updated_chains
+
+        payload = {"miner": {"overclock": new_overclock}}
+        _LOGGER.info(
+            "VNish apply_preset: changing '%s' -> '%s', globals: %s",
+            old_preset, preset_name, new_overclock.get("globals"),
+        )
 
         try:
             async with session.post(
@@ -275,11 +314,24 @@ class VNishAPI:
                 headers=self._auth_headers(),
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
+                resp_text = await resp.text()
+                _LOGGER.info(
+                    "VNish POST /settings response: HTTP %s, body: %s",
+                    resp.status, resp_text[:500],
+                )
                 if resp.status == 200:
-                    data = await resp.json()
-                    _LOGGER.info("VNish apply_preset '%s': %s", preset_name, data)
                     # Always restart mining to ensure the new preset takes effect
                     await self.restart_mining(session)
+                    # Verify the preset was actually applied
+                    verify_settings = await self.get_settings(session)
+                    applied = verify_settings.get("miner", {}).get("overclock", {}).get("preset")
+                    if applied != preset_name:
+                        _LOGGER.warning(
+                            "VNish preset verify: expected '%s' but got '%s'",
+                            preset_name, applied,
+                        )
+                    else:
+                        _LOGGER.info("VNish preset verified: '%s'", applied)
                     return True
                 _LOGGER.error("VNish apply_preset failed: HTTP %s", resp.status)
                 return False
@@ -616,7 +668,19 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
                 _LOGGER.error("VNish get_settings failed, cannot change preset")
                 return
 
-            success = await self._api.apply_preset(session, preset_name, settings)
+            # Look up the target preset's tune_settings
+            target_tune = None
+            for p in self._presets:
+                if p.get("name") == preset_name:
+                    target_tune = p.get("tune_settings")
+                    break
+            if not target_tune:
+                _LOGGER.warning(
+                    "VNish tune_settings not found for preset '%s', sending without tune values",
+                    preset_name,
+                )
+
+            success = await self._api.apply_preset(session, preset_name, settings, target_tune)
 
         if success:
             self._current_preset = option
