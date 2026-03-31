@@ -1,10 +1,12 @@
-"""Workmode and LED effect select entities for Avalon miners."""
+"""Workmode and LED effect select entities for Avalon miners, and VNish preset select."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
 from typing import Optional, Dict, Any
+
+import aiohttp
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -14,7 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import EntityCategory
 
-from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
+from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL, CONF_WEB_PASSWORD
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -176,6 +178,130 @@ def is_avalon_nano_miner(miner) -> bool:
     return False
 
 
+def is_vnish_miner(coordinator: MinerCoordinator) -> bool:
+    """Check if miner is running VNish firmware."""
+    miner = coordinator.miner
+    if miner is None or miner.web is None:
+        return False
+    return type(miner.web).__name__ == "VNishWebAPI"
+
+
+class VNishAPI:
+    """VNish firmware REST API client."""
+
+    def __init__(self, ip: str, password: str = "admin"):
+        self.ip = ip
+        self.password = password
+        self._base_url = f"http://{ip}/api/v1"
+        self._token: str | None = None
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Return Authorization header with stored token."""
+        if self._token:
+            return {"Authorization": self._token}
+        return {}
+
+    async def unlock(self, session: aiohttp.ClientSession) -> bool:
+        """Authenticate with VNish and store the auth token."""
+        try:
+            async with session.post(
+                f"{self._base_url}/unlock",
+                json={"pw": self.password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    self._token = data.get("token")
+                    _LOGGER.debug("VNish unlock OK, token=%s", self._token)
+                    return bool(self._token)
+                _LOGGER.error("VNish unlock failed: HTTP %s", resp.status)
+                return False
+        except Exception as e:
+            _LOGGER.error("VNish unlock error: %s", e)
+            return False
+
+    async def get_presets(self, session: aiohttp.ClientSession) -> list[dict]:
+        """Get available autotune presets."""
+        try:
+            async with session.get(
+                f"{self._base_url}/autotune/presets",
+                headers=self._auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data if isinstance(data, list) else data.get("presets", [])
+                _LOGGER.error("VNish get_presets failed: HTTP %s", resp.status)
+                return []
+        except Exception as e:
+            _LOGGER.error("VNish get_presets error: %s", e)
+            return []
+
+    async def get_settings(self, session: aiohttp.ClientSession) -> dict:
+        """Get current miner settings."""
+        try:
+            async with session.get(
+                f"{self._base_url}/settings",
+                headers=self._auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                _LOGGER.error("VNish get_settings failed: HTTP %s", resp.status)
+                return {}
+        except Exception as e:
+            _LOGGER.error("VNish get_settings error: %s", e)
+            return {}
+
+    async def apply_preset(self, session: aiohttp.ClientSession, preset_name: str, current_settings: dict) -> bool:
+        """Apply a preset by updating settings.
+
+        Only sends the miner.overclock section (matching pyasic behavior).
+        Always restarts mining after applying.
+        """
+        try:
+            overclock = current_settings["miner"]["overclock"].copy()
+        except KeyError:
+            _LOGGER.error("VNish settings missing miner.overclock path")
+            return False
+
+        overclock["preset"] = preset_name
+        payload = {"miner": {"overclock": overclock}}
+
+        try:
+            async with session.post(
+                f"{self._base_url}/settings",
+                json=payload,
+                headers=self._auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    _LOGGER.info("VNish apply_preset '%s': %s", preset_name, data)
+                    # Always restart mining to ensure the new preset takes effect
+                    await self.restart_mining(session)
+                    return True
+                _LOGGER.error("VNish apply_preset failed: HTTP %s", resp.status)
+                return False
+        except Exception as e:
+            _LOGGER.error("VNish apply_preset error: %s", e)
+            return False
+
+    async def restart_mining(self, session: aiohttp.ClientSession) -> bool:
+        """Restart mining process."""
+        try:
+            async with session.post(
+                f"{self._base_url}/mining/restart",
+                headers=self._auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                _LOGGER.info("VNish mining restart: HTTP %s", resp.status)
+                return resp.status == 200
+        except Exception as e:
+            _LOGGER.error("VNish restart error: %s", e)
+            return False
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -199,6 +325,14 @@ async def async_setup_entry(
         )
         entities.append(AvalonWorkModeSelect(coordinator))
         entities.append(AvalonLedEffectSelect(coordinator))
+
+    # Add VNish preset select for VNish firmware miners
+    if is_vnish_miner(coordinator):
+        _LOGGER.info(
+            "Detected VNish firmware at %s, adding preset select",
+            coordinator.data.get("ip"),
+        )
+        entities.append(VNishPresetSelect(coordinator))
 
     if entities:
         async_add_entities(entities)
@@ -399,3 +533,146 @@ class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     def available(self) -> bool:
         """Return if entity is available or not."""
         return self.coordinator.available
+
+
+class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
+    """Select entity for VNish firmware autotune preset."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: MinerCoordinator):
+        """Initialize the VNish preset select entity."""
+        super().__init__(coordinator=coordinator)
+        ip = coordinator.data["ip"]
+        password = coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "admin")
+        self._api = VNishAPI(ip, password)
+        self._presets: list[dict] = []
+        self._preset_map: dict[str, str] = {}  # pretty -> name
+        self._current_preset: str | None = None
+
+    @property
+    def name(self) -> str | None:
+        return f"{self.coordinator.config_entry.title} VNish Preset"
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data["mac"])},
+            connections={
+                ("ip", self.coordinator.data["ip"]),
+                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
+            },
+            configuration_url=f"http://{self.coordinator.data['ip']}",
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def unique_id(self) -> str | None:
+        return f"{self.coordinator.data['mac']}-vnish_preset"
+
+    @property
+    def options(self) -> list[str]:
+        """Return list of preset display names."""
+        if self._preset_map:
+            return list(self._preset_map.keys())
+        return []
+
+    @property
+    def current_option(self) -> str | None:
+        """Return current preset display name."""
+        vnish_preset = self.coordinator.data.get("vnish_preset")
+        if vnish_preset and self._preset_map:
+            # Find pretty name for current preset name
+            for pretty, name in self._preset_map.items():
+                if name == vnish_preset:
+                    return pretty
+        return self._current_preset
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the VNish preset."""
+        preset_name = self._preset_map.get(option)
+        if preset_name is None:
+            _LOGGER.error("Unknown VNish preset: %s", option)
+            return
+
+        _LOGGER.info(
+            "%s: Switching VNish preset to '%s' (%s)",
+            self.coordinator.config_entry.title,
+            option,
+            preset_name,
+        )
+
+        async with aiohttp.ClientSession() as session:
+            if not await self._api.unlock(session):
+                _LOGGER.error("VNish unlock failed, cannot change preset")
+                return
+
+            settings = await self._api.get_settings(session)
+            if not settings:
+                _LOGGER.error("VNish get_settings failed, cannot change preset")
+                return
+
+            success = await self._api.apply_preset(session, preset_name, settings)
+
+        if success:
+            self._current_preset = option
+            self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to apply VNish preset '%s'", option)
+
+    async def async_added_to_hass(self) -> None:
+        """Fetch presets and current setting when entity is added."""
+        await super().async_added_to_hass()
+        await self._fetch_presets()
+
+    async def _fetch_presets(self) -> None:
+        """Fetch available presets from VNish API."""
+        async with aiohttp.ClientSession() as session:
+            if not await self._api.unlock(session):
+                return
+
+            presets = await self._api.get_presets(session)
+            if not presets:
+                return
+
+            self._presets = presets
+            self._preset_map = {}
+            for p in presets:
+                pretty = p.get("pretty", p.get("name", "unknown"))
+                name = p.get("name", "unknown")
+                self._preset_map[pretty] = name
+
+            settings = await self._api.get_settings(session)
+            if settings:
+                current_name = (
+                    settings.get("miner", {})
+                    .get("overclock", {})
+                    .get("preset")
+                )
+                if current_name:
+                    for pretty, name in self._preset_map.items():
+                        if name == current_name:
+                            self._current_preset = pretty
+                            break
+
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        vnish_preset = self.coordinator.data.get("vnish_preset")
+        if vnish_preset and self._preset_map:
+            for pretty, name in self._preset_map.items():
+                if name == vnish_preset:
+                    self._current_preset = pretty
+                    break
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.available and bool(self._preset_map)

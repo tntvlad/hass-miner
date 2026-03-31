@@ -27,31 +27,6 @@ from .coordinator import _is_avalon_nano_miner
 _LOGGER = logging.getLogger(__name__)
 
 
-def format_difficulty(value: int | float | None) -> tuple[float | None, str]:
-    """Format difficulty value with appropriate unit suffix.
-    
-    Returns tuple of (scaled_value, unit_suffix).
-    Units: K (10^3), M (10^6), G (10^9), T (10^12), P (10^15), E (10^18), Z (10^21)
-    """
-    if value is None:
-        return None, ""
-    
-    units = [
-        (1e21, "Z"),  # Zetta
-        (1e18, "E"),  # Exa
-        (1e15, "P"),  # Peta
-        (1e12, "T"),  # Tera
-        (1e9, "G"),   # Giga
-        (1e6, "M"),   # Mega
-        (1e3, "K"),   # Kilo
-    ]
-    
-    for divisor, suffix in units:
-        if value >= divisor:
-            return round(value / divisor, 2), suffix
-    
-    return value, ""
-
 
 ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
     "temperature": SensorEntityDescription(
@@ -382,8 +357,6 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     """Defines an Avalon-specific Sensor (Best Share, Found Blocks)."""
 
     entity_description: SensorEntityDescription
-    _scaled_value: float | None = None
-    _unit_suffix: str = ""
 
     def __init__(
         self,
@@ -425,20 +398,7 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
-        raw_value = self._sensor_data
-        if self._sensor == "best_share" and raw_value is not None:
-            scaled, suffix = format_difficulty(raw_value)
-            self._scaled_value = scaled
-            self._unit_suffix = suffix
-            return scaled
-        return raw_value
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement for best_share with auto-scaling."""
-        if self._sensor == "best_share" and self._unit_suffix:
-            return self._unit_suffix
-        return self.entity_description.native_unit_of_measurement
+        return self._sensor_data
 
     @property
     def available(self) -> bool:

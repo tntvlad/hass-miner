@@ -237,3 +237,49 @@ def apply_whatsminer_power_limit_patch():
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply Whatsminer power limit patch: {e}")
         return False
+
+
+def apply_vnish_get_config_patch():
+    """Patch VNish.get_config to handle autotune_presets returning a list.
+
+    In pyasic 0.78.0, VNish.get_config() does web_presets_dict.get("presets", [])
+    but autotune_presets() returns a JSON array (list), not a dict.  This causes
+    AttributeError: 'list' object has no attribute 'get' which also breaks
+    set_power_limit since it calls get_config() internally.
+    """
+    try:
+        from pyasic.miners.backends.vnish import VNish
+        from pyasic import MinerConfig
+        from pyasic.errors import APIError
+
+        if hasattr(VNish, '_hass_get_config_patched'):
+            _PATCH_LOGGER.debug("VNish get_config already patched")
+            return True
+
+        async def patched_get_config(self) -> MinerConfig:
+            try:
+                web_settings = await self.web.settings()
+                web_presets_raw = await self.web.autotune_presets()
+                # autotune_presets() returns a list, not a dict
+                if isinstance(web_presets_raw, list):
+                    web_presets = web_presets_raw
+                elif web_presets_raw:
+                    web_presets = web_presets_raw.get("presets", [])
+                else:
+                    web_presets = []
+                web_perf_summary = (await self.web.perf_summary()) or {}
+            except APIError:
+                return self.config or MinerConfig()
+            self.config = MinerConfig.from_vnish(
+                web_settings, web_presets, web_perf_summary
+            )
+            return self.config
+
+        VNish.get_config = patched_get_config
+        VNish._hass_get_config_patched = True
+        _PATCH_LOGGER.info("Applied VNish get_config patch (list vs dict fix)")
+        return True
+
+    except Exception as e:
+        _PATCH_LOGGER.warning(f"Failed to apply VNish get_config patch: {e}")
+        return False

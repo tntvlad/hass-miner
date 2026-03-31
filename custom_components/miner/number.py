@@ -45,7 +45,13 @@ async def async_setup_entry(
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     await coordinator.async_config_entry_first_refresh()
-    if coordinator.miner.supports_autotuning:
+
+    # Skip power limit slider for VNish miners — use VNish Preset select instead
+    is_vnish = (
+        coordinator.miner.web is not None
+        and type(coordinator.miner.web).__name__ == "VNishWebAPI"
+    )
+    if coordinator.miner.supports_autotuning and not is_vnish:
         async_add_entities(
             [
                 MinerPowerLimitNumber(

@@ -55,6 +55,7 @@ DEFAULT_DATA = {
     "avalon_best_share": None,
     "avalon_found_blocks": None,
     "avalon_asc_enabled": None,
+    "vnish_preset": None,
 }
 
 
@@ -210,6 +211,44 @@ def _is_avalon_nano_miner(miner) -> bool:
         if "nano" in model or "nano" in miner_class_name:
             return True
     return False
+
+
+async def _fetch_vnish_preset(ip: str, password: str = "admin") -> Optional[str]:
+    """Fetch current VNish autotune preset name via REST API."""
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Unlock and get auth token
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                token = (await resp.json()).get("token")
+                if not token:
+                    return None
+
+            # Get settings to read current preset
+            async with session.get(
+                f"{base_url}/settings",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                settings = await resp.json()
+                return (
+                    settings.get("miner", {})
+                    .get("overclock", {})
+                    .get("preset")
+                )
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch VNish preset: %s", e)
+    return None
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -422,6 +461,7 @@ class MinerCoordinator(DataUpdateCoordinator):
             "avalon_best_share": None,
             "avalon_found_blocks": None,
             "avalon_asc_enabled": None,
+            "vnish_preset": None,
         }
 
         # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
@@ -451,5 +491,14 @@ class MinerCoordinator(DataUpdateCoordinator):
             asc_enabled = await _fetch_avalon_asc_enabled(self.miner.ip)
             if asc_enabled is not None:
                 data["avalon_asc_enabled"] = asc_enabled
+
+        # Fetch VNish preset for VNish firmware miners
+        if self.miner.web is not None and type(self.miner.web).__name__ == "VNishWebAPI":
+            vnish_preset = await _fetch_vnish_preset(
+                self.miner.ip,
+                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
+            )
+            if vnish_preset:
+                data["vnish_preset"] = vnish_preset
 
         return data
