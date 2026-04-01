@@ -314,14 +314,17 @@ class VNishAPI:
                 headers=self._auth_headers(),
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
-                resp_text = await resp.text()
+                resp_json = await resp.json()
                 _LOGGER.info(
                     "VNish POST /settings response: HTTP %s, body: %s",
-                    resp.status, resp_text[:500],
+                    resp.status, resp_json,
                 )
                 if resp.status == 200:
-                    # Always restart mining to ensure the new preset takes effect
-                    await self.restart_mining(session)
+                    # Only restart mining if VNish says it's required
+                    if resp_json.get("restart_required", False):
+                        await self.restart_mining(session)
+                    else:
+                        _LOGGER.info("VNish: restart not required, skipping")
                     # Verify the preset was actually applied
                     verify_settings = await self.get_settings(session)
                     applied = verify_settings.get("miner", {}).get("overclock", {}).get("preset")
