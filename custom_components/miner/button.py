@@ -1,4 +1,5 @@
 """Support for Avalon Miner buttons (Reboot)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -71,7 +72,9 @@ class AvalonRebootButton(CoordinatorEntity[MinerCoordinator], ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press - reboot the miner."""
         ip = self.coordinator.data["ip"]
-        _LOGGER.info("%s: Rebooting miner at %s", self.coordinator.config_entry.title, ip)
+        _LOGGER.info(
+            "%s: Rebooting miner at %s", self.coordinator.config_entry.title, ip
+        )
 
         try:
             reader, writer = await asyncio.wait_for(
@@ -93,7 +96,10 @@ class AvalonRebootButton(CoordinatorEntity[MinerCoordinator], ButtonEntity):
             writer.close()
             await writer.wait_closed()
 
-            _LOGGER.info("%s: Reboot command sent successfully", self.coordinator.config_entry.title)
+            _LOGGER.info(
+                "%s: Reboot command sent successfully",
+                self.coordinator.config_entry.title,
+            )
 
         except Exception as e:
             _LOGGER.error("Failed to reboot miner: %s", e)

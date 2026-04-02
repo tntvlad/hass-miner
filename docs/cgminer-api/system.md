@@ -11,6 +11,7 @@ Restart the miner.
 **Command:** `restart`
 
 **Example:**
+
 ```bash
 $ echo "restart" | nc 192.168.1.100 4028
 STATUS=S,When=1711526400,Code=7,Msg=CGMiner restart,Description=cgminer 4.12.1|
@@ -28,12 +29,13 @@ Get CGMiner and API version information.
 
 **Response Fields:**
 
-| Field | Description |
-|-------|-------------|
+| Field   | Description     |
+| ------- | --------------- |
 | CGMiner | CGMiner version |
-| API | API version |
+| API     | API version     |
 
 **Example:**
+
 ```bash
 $ echo "version" | nc 192.168.1.100 4028
 STATUS=S,When=1711526400,Code=22,Msg=CGMiner versions,Description=cgminer 4.12.1|
@@ -50,12 +52,13 @@ Check if a command exists and if you have access.
 
 **Response Fields:**
 
-| Field | Values | Description |
-|-------|--------|-------------|
-| Exists | Y/N | Command exists |
-| Access | Y/N | You have access |
+| Field  | Values | Description     |
+| ------ | ------ | --------------- |
+| Exists | Y/N    | Command exists  |
+| Access | Y/N    | You have access |
 
 **Example:**
+
 ```bash
 $ echo "check|restart" | nc 192.168.1.100 4028
 STATUS=S,When=1711526400,Code=70,Msg=Check command,Description=cgminer 4.12.1|
@@ -71,6 +74,7 @@ Stop the CGMiner process. **Use with caution!**
 **Command:** `quit`
 
 **Example:**
+
 ```bash
 $ echo "quit" | nc 192.168.1.100 4028
 STATUS=S,When=1711526400,Code=0,Msg=BYE|
@@ -92,21 +96,21 @@ async def reboot_miner(ip: str, timeout: int = 10) -> bool:
             asyncio.open_connection(ip, 4028),
             timeout=timeout,
         )
-        
+
         writer.write(b"restart")
         await writer.drain()
-        
+
         # Try to read response (may timeout - that's OK)
         try:
             response = await asyncio.wait_for(reader.read(4096), timeout=5)
             print(f"Response: {response.decode()}")
         except asyncio.TimeoutError:
             print("No response (miner is rebooting)")
-        
+
         writer.close()
         await writer.wait_closed()
         return True
-        
+
     except Exception as e:
         print(f"Reboot failed: {e}")
         return False
@@ -132,11 +136,11 @@ The button sends the `restart` command via the CGMiner API.
 
 The following system commands are **not available** on the Avalon Nano 3s:
 
-| Command | Why Not Supported |
-|---------|-------------------|
-| `save` | No config save support |
+| Command   | Why Not Supported          |
+| --------- | -------------------------- |
+| `save`    | No config save support     |
 | `hotplug` | USB hotplug not applicable |
-| `debug` | Debug modes not exposed |
+| `debug`   | Debug modes not exposed    |
 
 ---
 

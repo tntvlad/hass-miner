@@ -1,4 +1,5 @@
 """Lightweight test for `set_work_mode` device action."""
+
 import asyncio
 
 from custom_components.miner.device_action import async_call_action_from_config

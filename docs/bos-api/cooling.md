@@ -7,6 +7,7 @@ Temperature and fan control.
 **Endpoint:** `GET /api/v1/cooling/state`
 
 **Response:**
+
 ```json
 {
   "fans": [],
@@ -21,17 +22,19 @@ Temperature and fan control.
 Modes: `auto`, `manual`, `immersion`, `hydro`
 
 ### Auto Mode
+
 ```json
 {
   "auto": {
-    "target_temperature": {"celsius": 75},
-    "hot_temperature": {"celsius": 85},
-    "dangerous_temperature": {"celsius": 95}
+    "target_temperature": { "celsius": 75 },
+    "hot_temperature": { "celsius": 85 },
+    "dangerous_temperature": { "celsius": 95 }
   }
 }
 ```
 
 ### Manual Mode
+
 ```json
 {
   "manual": {
@@ -41,23 +44,25 @@ Modes: `auto`, `manual`, `immersion`, `hydro`
 ```
 
 ### Immersion Mode
+
 ```json
 {
   "immersion": {
-    "target_temperature": {"celsius": 75},
-    "hot_temperature": {"celsius": 85},
-    "dangerous_temperature": {"celsius": 95}
+    "target_temperature": { "celsius": 75 },
+    "hot_temperature": { "celsius": 85 },
+    "dangerous_temperature": { "celsius": 95 }
   }
 }
 ```
 
 ### Hydro Mode
+
 ```json
 {
   "hydro": {
-    "target_temperature": {"celsius": 75},
-    "hot_temperature": {"celsius": 85},
-    "dangerous_temperature": {"celsius": 95}
+    "target_temperature": { "celsius": 75 },
+    "hot_temperature": { "celsius": 85 },
+    "dangerous_temperature": { "celsius": 95 }
   }
 }
 ```

@@ -7,6 +7,7 @@ Network configuration.
 **Endpoint:** `GET /api/v1/network/`
 
 **Response:**
+
 ```json
 {
   "name": "eth0",
@@ -24,6 +25,7 @@ Network configuration.
 **Endpoint:** `GET /api/v1/network/configuration`
 
 **Response:**
+
 ```json
 {
   "hostname": "miner-01.local",
@@ -38,6 +40,7 @@ Network configuration.
 **Endpoint:** `PATCH /api/v1/network/configuration`
 
 ### DHCP
+
 ```json
 {
   "hostname": "miner-01.local",
@@ -48,6 +51,7 @@ Network configuration.
 ```
 
 ### Static IP
+
 ```json
 {
   "hostname": "miner-01.local",

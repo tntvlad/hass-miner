@@ -1,8 +1,8 @@
 # CGMiner API Documentation (Avalon Nano 3s)
 
-**API Version:** CGMiner 4.x  
-**Protocol:** TCP Socket (ASCII)  
-**Port:** 4028  
+**API Version:** CGMiner 4.x
+**Protocol:** TCP Socket (ASCII)
+**Port:** 4028
 **Target Device:** Avalon Nano 3s
 
 ## Overview
@@ -75,12 +75,12 @@ The CGMiner API on Avalon Nano 3s does **not require authentication** by default
 
 ## Limitations
 
-| Feature | Supported | Notes |
-|---------|-----------|-------|
-| Workmode | ✅ Yes | Low (0), Mid (1), High (2) |
-| LED Control | ✅ Yes | Effect, brightness, RGB |
-| Reboot | ✅ Yes | Via `restart` command |
-| Pause Mining | ✅ Yes | Via `ascdisable\|0` command |
-| Resume Mining | ✅ Yes | Via `ascenable\|0` command |
-| Overclock | ❌ No | Use workmode instead |
-| Voltage Control | ❌ No | Fixed by hardware |
+| Feature         | Supported | Notes                       |
+| --------------- | --------- | --------------------------- |
+| Workmode        | ✅ Yes    | Low (0), Mid (1), High (2)  |
+| LED Control     | ✅ Yes    | Effect, brightness, RGB     |
+| Reboot          | ✅ Yes    | Via `restart` command       |
+| Pause Mining    | ✅ Yes    | Via `ascdisable\|0` command |
+| Resume Mining   | ✅ Yes    | Via `ascenable\|0` command  |
+| Overclock       | ❌ No     | Use workmode instead        |
+| Voltage Control | ❌ No     | Fixed by hardware           |

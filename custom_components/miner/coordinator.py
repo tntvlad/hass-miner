@@ -1,9 +1,10 @@
 """Miner DataUpdateCoordinator."""
+
 import asyncio
 import logging
 import re
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pyasic
@@ -11,19 +12,20 @@ if TYPE_CHECKING:
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_IP
-from .const import CONF_MIN_POWER
-from .const import CONF_MAX_POWER
-from .const import CONF_RPC_PASSWORD
-from .const import CONF_SSH_PASSWORD
-from .const import CONF_SSH_USERNAME
-from .const import CONF_WEB_PASSWORD
-from .const import CONF_WEB_USERNAME
-from .const import CONF_AVALON_CONTROL_MODE
-from .const import AVALON_MODE_FULL
+from .const import (
+    AVALON_MODE_FULL,
+    CONF_AVALON_CONTROL_MODE,
+    CONF_IP,
+    CONF_MAX_POWER,
+    CONF_MIN_POWER,
+    CONF_RPC_PASSWORD,
+    CONF_SSH_PASSWORD,
+    CONF_SSH_USERNAME,
+    CONF_WEB_PASSWORD,
+    CONF_WEB_USERNAME,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ DEFAULT_DATA = {
 }
 
 
-async def _fetch_avalon_workmode(ip: str, timeout: int = 10) -> Optional[int]:
+async def _fetch_avalon_workmode(ip: str, timeout: int = 10) -> int | None:
     """Fetch workmode from Avalon miner via CGMiner API."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -88,7 +90,7 @@ async def _fetch_avalon_workmode(ip: str, timeout: int = 10) -> Optional[int]:
     return None
 
 
-async def _fetch_avalon_led_state(ip: str, timeout: int = 10) -> Optional[dict]:
+async def _fetch_avalon_led_state(ip: str, timeout: int = 10) -> dict | None:
     """Fetch LED state from Avalon miner via CGMiner API estats command."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -112,12 +114,14 @@ async def _fetch_avalon_led_state(ip: str, timeout: int = 10) -> Optional[dict]:
 
         # Parse LED data: LED[effect-W-intensity-R-G-B] (WRGB format)
         # Also check for LEDUser format
-        led_match = re.search(r"LED(?:User)?\[(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-(\d+)\]", response)
+        led_match = re.search(
+            r"LED(?:User)?\[(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-(\d+)\]", response
+        )
         if led_match:
             return {
                 "effect": int(led_match.group(1)),
-                "white": int(led_match.group(2)),      # W channel (0-100)
-                "intensity": int(led_match.group(3)),   # Overall intensity (0-100)
+                "white": int(led_match.group(2)),  # W channel (0-100)
+                "intensity": int(led_match.group(3)),  # Overall intensity (0-100)
                 "r": int(led_match.group(4)),
                 "g": int(led_match.group(5)),
                 "b": int(led_match.group(6)),
@@ -127,7 +131,7 @@ async def _fetch_avalon_led_state(ip: str, timeout: int = 10) -> Optional[dict]:
     return None
 
 
-async def _fetch_avalon_summary(ip: str, timeout: int = 10) -> Optional[dict]:
+async def _fetch_avalon_summary(ip: str, timeout: int = 10) -> dict | None:
     """Fetch summary data from Avalon miner via CGMiner API."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -167,7 +171,7 @@ async def _fetch_avalon_summary(ip: str, timeout: int = 10) -> Optional[dict]:
     return None
 
 
-async def _fetch_avalon_asc_enabled(ip: str, timeout: int = 10) -> Optional[bool]:
+async def _fetch_avalon_asc_enabled(ip: str, timeout: int = 10) -> bool | None:
     """Fetch ASC device enabled state from Avalon miner via CGMiner API devs command."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -213,7 +217,7 @@ def _is_avalon_nano_miner(miner) -> bool:
     return False
 
 
-async def _fetch_vnish_preset(ip: str, password: str = "admin") -> Optional[str]:
+async def _fetch_vnish_preset(ip: str, password: str = "admin") -> str | None:
     """Fetch current VNish autotune preset name via REST API."""
     import aiohttp
 
@@ -241,11 +245,7 @@ async def _fetch_vnish_preset(ip: str, password: str = "admin") -> Optional[str]
                 if resp.status != 200:
                     return None
                 settings = await resp.json()
-                return (
-                    settings.get("miner", {})
-                    .get("overclock", {})
-                    .get("preset")
-                )
+                return settings.get("miner", {}).get("overclock", {}).get("preset")
     except Exception as e:
         _LOGGER.debug("Failed to fetch VNish preset: %s", e)
     return None
@@ -364,7 +364,9 @@ class MinerCoordinator(DataUpdateCoordinator):
                             **DEFAULT_DATA,
                             "power_limit_range": {
                                 "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                                "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
+                                "max": self.config_entry.data.get(
+                                    CONF_MAX_POWER, 10000
+                                ),
                             },
                         }
                     _LOGGER.exception(retry_err)
@@ -394,7 +396,7 @@ class MinerCoordinator(DataUpdateCoordinator):
 
         def normalize_hashrate_to_th(value):
             """Normalize hashrate to TH/s.
-            
+
             pyasic may return hashrate in different units (H/s, GH/s, TH/s).
             If the value is unreasonably high (>1 million), assume it's in H/s
             and convert to TH/s by dividing by 10^12.
@@ -465,7 +467,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         }
 
         # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
-        avalon_mode = self.config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
+        avalon_mode = self.config_entry.data.get(
+            CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
+        )
         if _is_avalon_nano_miner(self.miner) and avalon_mode == AVALON_MODE_FULL:
             workmode = await _fetch_avalon_workmode(self.miner.ip)
             data["avalon_workmode"] = workmode
@@ -493,7 +497,10 @@ class MinerCoordinator(DataUpdateCoordinator):
                 data["avalon_asc_enabled"] = asc_enabled
 
         # Fetch VNish preset for VNish firmware miners
-        if self.miner.web is not None and type(self.miner.web).__name__ == "VNishWebAPI":
+        if (
+            self.miner.web is not None
+            and type(self.miner.web).__name__ == "VNishWebAPI"
+        ):
             vnish_preset = await _fetch_vnish_preset(
                 self.miner.ip,
                 self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),

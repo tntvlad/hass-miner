@@ -1,15 +1,14 @@
 """Patch annoying home assistant dependency handling and fix pyasic issues."""
+
 from __future__ import annotations
 
 import logging
 import os
 import site
 import sys
-from subprocess import PIPE
-from subprocess import Popen
+from subprocess import PIPE, Popen
 
-from homeassistant.util.package import _LOGGER
-from homeassistant.util.package import is_virtual_env
+from homeassistant.util.package import _LOGGER, is_virtual_env
 
 _PATCH_LOGGER = logging.getLogger(__name__)
 
@@ -96,33 +95,35 @@ def install_package(
 
 def apply_pydantic_property_patch():
     """Patch pydantic to handle property objects in Python 3.14+.
-    
+
     Python 3.14 changed how property objects are represented in type annotations.
     This causes pydantic's schema generation to fail when it encounters
     @computed_field + @property decorated methods in pyasic's MinerData class.
-    
+
     This patch modifies pydantic's _unknown_type_schema to return Any schema
     for property objects instead of raising an error.
     """
     import sys
-    
+
     # Only needed for Python 3.14+
     if sys.version_info < (3, 14):
         _PATCH_LOGGER.debug("Python < 3.14, skipping pydantic property patch")
         return True
-    
+
     try:
         from pydantic._internal import _generate_schema
         from pydantic_core import core_schema
-        
+
         # Check if already patched
-        if hasattr(_generate_schema, '_hass_property_patched'):
+        if hasattr(_generate_schema, "_hass_property_patched"):
             _PATCH_LOGGER.debug("Pydantic already patched for property handling")
             return True
-        
+
         # Store original method
-        original_unknown_type_schema = _generate_schema.GenerateSchema._unknown_type_schema
-        
+        original_unknown_type_schema = (
+            _generate_schema.GenerateSchema._unknown_type_schema
+        )
+
         def patched_unknown_type_schema(self, obj):
             """Handle property objects gracefully instead of raising error."""
             # If it's a property object, return an Any schema
@@ -132,13 +133,17 @@ def apply_pydantic_property_patch():
                 return core_schema.any_schema()
             # Otherwise use original implementation
             return original_unknown_type_schema(self, obj)
-        
+
         # Apply patch
-        _generate_schema.GenerateSchema._unknown_type_schema = patched_unknown_type_schema
+        _generate_schema.GenerateSchema._unknown_type_schema = (
+            patched_unknown_type_schema
+        )
         _generate_schema._hass_property_patched = True
-        _PATCH_LOGGER.info("Applied pydantic property patch for Python 3.14 compatibility")
+        _PATCH_LOGGER.info(
+            "Applied pydantic property patch for Python 3.14 compatibility"
+        )
         return True
-        
+
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply pydantic property patch: {e}")
         return False
@@ -155,9 +160,10 @@ def apply_avalonminer_web_patch():
     """
     try:
         import json
+
         from pyasic.web.avalonminer import AvalonMinerWebAPI
 
-        if hasattr(AvalonMinerWebAPI, '_hass_web_patched'):
+        if hasattr(AvalonMinerWebAPI, "_hass_web_patched"):
             _PATCH_LOGGER.debug("AvalonMiner web API already patched")
             return True
 
@@ -195,10 +201,10 @@ def apply_whatsminer_power_limit_patch():
     and the HA slider resets to the old value on the next coordinator update.
     """
     try:
-        from pyasic.rpc.btminer import BTMinerRPCAPI
         from pyasic.errors import APIError
+        from pyasic.rpc.btminer import BTMinerRPCAPI
 
-        if hasattr(BTMinerRPCAPI, '_hass_power_limit_patched'):
+        if hasattr(BTMinerRPCAPI, "_hass_power_limit_patched"):
             _PATCH_LOGGER.debug("Whatsminer power limit already patched")
             return True
 
@@ -209,11 +215,14 @@ def apply_whatsminer_power_limit_patch():
         ):
             try:
                 return await original_send(
-                    self, command, ignore_errors=ignore_errors,
-                    timeout=timeout, **kwargs
+                    self,
+                    command,
+                    ignore_errors=ignore_errors,
+                    timeout=timeout,
+                    **kwargs,
                 )
             except APIError as e:
-                if not getattr(e, 'message', str(e)) == "can't access write cmd":
+                if not getattr(e, "message", str(e)) == "can't access write cmd":
                     raise
                 # Restore v0.75.0 behavior: open API and retry
                 _PATCH_LOGGER.info(
@@ -225,8 +234,11 @@ def apply_whatsminer_power_limit_patch():
                 except Exception as oe:
                     raise APIError("Failed to open whatsminer API.") from oe
                 return await original_send(
-                    self, command, ignore_errors=ignore_errors,
-                    timeout=timeout, **kwargs
+                    self,
+                    command,
+                    ignore_errors=ignore_errors,
+                    timeout=timeout,
+                    **kwargs,
                 )
 
         BTMinerRPCAPI.send_privileged_command = patched_send_privileged_command
@@ -248,11 +260,11 @@ def apply_vnish_get_config_patch():
     set_power_limit since it calls get_config() internally.
     """
     try:
-        from pyasic.miners.backends.vnish import VNish
         from pyasic import MinerConfig
         from pyasic.errors import APIError
+        from pyasic.miners.backends.vnish import VNish
 
-        if hasattr(VNish, '_hass_get_config_patched'):
+        if hasattr(VNish, "_hass_get_config_patched"):
             _PATCH_LOGGER.debug("VNish get_config already patched")
             return True
 

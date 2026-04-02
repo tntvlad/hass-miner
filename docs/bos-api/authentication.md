@@ -7,6 +7,7 @@ Authenticates a user and returns a token for subsequent requests.
 **Endpoint:** `POST /api/v1/auth/login`
 
 **Request Body:**
+
 ```json
 {
   "username": "root",
@@ -15,6 +16,7 @@ Authenticates a user and returns a token for subsequent requests.
 ```
 
 **Response (200):**
+
 ```json
 {
   "token": "XEQclIUShm7QhQzz",
@@ -24,6 +26,7 @@ Authenticates a user and returns a token for subsequent requests.
 
 **Usage:**
 Include the token in all subsequent requests:
+
 ```
 Authorization: Bearer <token>
 ```
@@ -37,6 +40,7 @@ Set or remove user password.
 **Endpoint:** `PUT /api/v1/auth/password`
 
 **Request Body:**
+
 ```json
 {
   "password": "newpassword"

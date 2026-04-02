@@ -25,6 +25,7 @@ Works great in coordination with [ESPHome](https://www.home-assistant.io/integra
 This beta branch includes new implementations not yet available in the main branch:
 
 ### Whatsminer M30S
+
 - **Power Limit Control** - Fixed power limit slider that was resetting after 2 seconds ([#1](https://github.com/tntvlad/hass-miner/issues/1))
 - **Auto API Enable** - Automatically enables Whatsminer API when "can't access write cmd" error occurs
 - **RPC Password Support** - Configure RPC password during setup for encrypted API commands
@@ -36,6 +37,7 @@ This beta branch includes new implementations not yet available in the main bran
 > **Note:** If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
 
 ### Avalon Nano 3s
+
 - **CGMiner API** - Direct CGMiner API communication (port 4028)
 - **Work Mode Control** - Switch between Low/Mid/High mining modes
 - **LED Control** - RGB color picker and effect selection (Stay, Flash, Breathing, Loop)
@@ -80,6 +82,7 @@ This beta branch includes new implementations not yet available in the main bran
 ## Installation
 
 ### Option 1: Manual HACS Installation
+
 1. Open HACS in Home Assistant
 2. Click the three dots menu (⋮) in the top right
 3. Select **Custom repositories**
@@ -88,8 +91,8 @@ This beta branch includes new implementations not yet available in the main bran
 6. Search for "Miner" in HACS and download
 
 ### Option 2: One-Click Install
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tntvlad&repository=hass-miner&category=integration)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tntvlad&repository=hass-miner&category=integration)
 
 ## Contributions are welcome!
 
@@ -106,9 +109,11 @@ Miner control and data is handled using [@UpstreamData](https://github.com/Upstr
 ## Known Issues (Beta)
 
 ### Whatsminer M30S
+
 - **Chip Temperature** - May show "unknown" on some firmware versions (investigating)
 
 ### Avalon Nano 3s
+
 - **LED Brightness** - Brightness slider not working correctly (WRGB format investigation needed)
 - **Mining Enable/Disable** - `ascenable`/`ascdisable` command format needs investigation
 - **Restart Function** - Miner restart service not yet implemented

@@ -1,7 +1,7 @@
 # Braiins OS Public REST API Documentation
 
-**API Version:** 1.2.0  
-**Base URL:** `http://<miner-ip>/api/v1`  
+**API Version:** 1.2.0
+**Base URL:** `http://<miner-ip>/api/v1`
 **Official Docs:** https://developer.braiins-os.com/latest/openapi.html
 
 ## Overview

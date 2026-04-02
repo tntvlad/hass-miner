@@ -1,22 +1,22 @@
 """Workmode and LED effect select entities for Avalon miners, and VNish preset select."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Any
 
 import aiohttp
-
 from homeassistant.components.select import SelectEntity
+from homeassistant.components.sensor import EntityCategory
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback, HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.components.sensor import EntityCategory
 
-from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL, CONF_WEB_PASSWORD
+from .const import AVALON_MODE_FULL, CONF_AVALON_CONTROL_MODE, CONF_WEB_PASSWORD, DOMAIN
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class AvalonCGMinerAPI:
         self.port = port
         self.timeout = timeout
 
-    async def _send_command(self, command: str) -> Optional[str]:
+    async def _send_command(self, command: str) -> str | None:
         """Send a command to the CGMiner API and return the response."""
         try:
             reader, writer = await asyncio.wait_for(
@@ -68,13 +68,17 @@ class AvalonCGMinerAPI:
             writer.close()
             await writer.wait_closed()
             response = raw.decode("utf-8", errors="ignore").strip()
-            _LOGGER.info("CGMiner command '%s' response: %s", command, response[:500] if response else "(empty)")
+            _LOGGER.info(
+                "CGMiner command '%s' response: %s",
+                command,
+                response[:500] if response else "(empty)",
+            )
             return response
         except Exception as e:
             _LOGGER.error("CGMiner command '%s' failed: %s", command, e)
             return None
 
-    async def get_workmode(self) -> Optional[int]:
+    async def get_workmode(self) -> int | None:
         """Get current workmode from estats command."""
         raw = await self._send_command("estats")
         if not raw:
@@ -96,7 +100,7 @@ class AvalonCGMinerAPI:
         # Check for success status
         return "STATUS=S" in raw or "success" in raw.lower()
 
-    async def get_summary(self) -> Dict[str, Any]:
+    async def get_summary(self) -> dict[str, Any]:
         """Get mining summary (Best Share, Found Blocks, etc)."""
         raw = await self._send_command("summary")
         if not raw:
@@ -117,7 +121,7 @@ class AvalonCGMinerAPI:
                 result[key] = value
         return result
 
-    async def get_led_state(self) -> Dict[str, Any]:
+    async def get_led_state(self) -> dict[str, Any]:
         """Get LED state from estats command."""
         raw = await self._send_command("estats")
         if not raw:
@@ -131,17 +135,19 @@ class AvalonCGMinerAPI:
             if len(parts) >= 6:
                 result = {
                     "effect": int(parts[0]),
-                    "white": int(parts[1]),      # W channel (0-100)
-                    "intensity": int(parts[2]),   # Overall intensity (0-100)
+                    "white": int(parts[1]),  # W channel (0-100)
+                    "intensity": int(parts[2]),  # Overall intensity (0-100)
                     "r": int(parts[3]),
                     "g": int(parts[4]),
                     "b": int(parts[5]),
                 }
         return result
 
-    async def set_led(self, effect: int, white: int, intensity: int, r: int, g: int, b: int) -> bool:
+    async def set_led(
+        self, effect: int, white: int, intensity: int, r: int, g: int, b: int
+    ) -> bool:
         """Set LED using ascset command.
-        
+
         Format: effect-W-intensity-R-G-B (WRGB LED strip)
         - effect: LED effect mode (0=off, 1=stay, 2=flash, 3=breathing, 4=loop)
         - white: White channel brightness (0-100)
@@ -165,16 +171,16 @@ def is_avalon_nano_miner(miner) -> bool:
     """Check if miner is an Avalon Nano (supports workmode)."""
     if miner is None:
         return False
-    
+
     miner_class_name = miner.__class__.__name__.lower()
     model = getattr(miner, "model", "") or ""
     make = getattr(miner, "make", "") or ""
-    
+
     # Check for Avalon Nano models
     if "avalon" in miner_class_name.lower() or "avalon" in make.lower():
         if "nano" in model.lower() or "nano" in miner_class_name.lower():
             return True
-    
+
     return False
 
 
@@ -190,6 +196,7 @@ class VNishAPI:
     """VNish firmware REST API client."""
 
     def __init__(self, ip: str, password: str = "admin"):
+        """Initialize the VNish API client."""
         self.ip = ip
         self.password = password
         self._base_url = f"http://{ip}/api/v1"
@@ -304,7 +311,9 @@ class VNishAPI:
         payload = {"miner": {"overclock": new_overclock}}
         _LOGGER.info(
             "VNish apply_preset: changing '%s' -> '%s', globals: %s",
-            old_preset, preset_name, new_overclock.get("globals"),
+            old_preset,
+            preset_name,
+            new_overclock.get("globals"),
         )
 
         try:
@@ -317,7 +326,8 @@ class VNishAPI:
                 resp_json = await resp.json()
                 _LOGGER.info(
                     "VNish POST /settings response: HTTP %s, body: %s",
-                    resp.status, resp_json,
+                    resp.status,
+                    resp_json,
                 )
                 if resp.status == 200:
                     # Only restart mining if VNish says it's required
@@ -327,11 +337,16 @@ class VNishAPI:
                         _LOGGER.info("VNish: restart not required, skipping")
                     # Verify the preset was actually applied
                     verify_settings = await self.get_settings(session)
-                    applied = verify_settings.get("miner", {}).get("overclock", {}).get("preset")
+                    applied = (
+                        verify_settings.get("miner", {})
+                        .get("overclock", {})
+                        .get("preset")
+                    )
                     if applied != preset_name:
                         _LOGGER.warning(
                             "VNish preset verify: expected '%s' but got '%s'",
-                            preset_name, applied,
+                            preset_name,
+                            applied,
                         )
                     else:
                         _LOGGER.info("VNish preset verified: '%s'", applied)
@@ -371,7 +386,7 @@ async def async_setup_entry(
 
     # Check if user wants full CGMiner control for Avalon miners
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
-    
+
     # Add workmode and LED effect select for Avalon Nano miners (only in full mode)
     if is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
         _LOGGER.info(
@@ -404,7 +419,7 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         """Initialize the workmode select entity."""
         super().__init__(coordinator=coordinator)
         self._api = AvalonCGMinerAPI(coordinator.data["ip"])
-        self._current_mode: Optional[str] = None
+        self._current_mode: str | None = None
 
     @property
     def name(self) -> str | None:
@@ -497,8 +512,8 @@ class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         """Initialize the LED effect select entity."""
         super().__init__(coordinator=coordinator)
         self._api = AvalonCGMinerAPI(coordinator.data["ip"])
-        self._current_effect: Optional[str] = "Stay"
-        self._led_state: Dict[str, Any] = {}
+        self._current_effect: str | None = "Stay"
+        self._led_state: dict[str, Any] = {}
 
     @property
     def name(self) -> str | None:
@@ -608,10 +623,12 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
     @property
     def name(self) -> str | None:
+        """Return the entity name."""
         return f"{self.coordinator.config_entry.title} VNish Preset"
 
     @property
     def device_info(self) -> entity.DeviceInfo:
+        """Return device registry information for this entity."""
         return entity.DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.data["mac"])},
             connections={
@@ -627,6 +644,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
     @property
     def unique_id(self) -> str | None:
+        """Return a unique ID for this entity."""
         return f"{self.coordinator.data['mac']}-vnish_preset"
 
     @property
@@ -683,7 +701,9 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
                     preset_name,
                 )
 
-            success = await self._api.apply_preset(session, preset_name, settings, target_tune)
+            success = await self._api.apply_preset(
+                session, preset_name, settings, target_tune
+            )
 
         if success:
             self._current_preset = option
@@ -717,9 +737,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
             settings = await self._api.get_settings(session)
             if settings:
                 current_name = (
-                    settings.get("miner", {})
-                    .get("overclock", {})
-                    .get("preset")
+                    settings.get("miner", {}).get("overclock", {}).get("preset")
                 )
                 if current_name:
                     for pretty, name in self._preset_map.items():
@@ -731,7 +749,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+        """Update local state when coordinator data changes."""
         vnish_preset = self.coordinator.data.get("vnish_preset")
         if vnish_preset and self._preset_map:
             for pretty, name in self._preset_map.items():
@@ -742,4 +760,5 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
     @property
     def available(self) -> bool:
+        """Return whether the entity is available."""
         return self.coordinator.available and bool(self._preset_map)

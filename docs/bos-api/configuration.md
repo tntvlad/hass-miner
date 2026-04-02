@@ -7,6 +7,7 @@
 Returns miner configuration constraints (min/max values).
 
 **Response:**
+
 ```json
 {
   "cooling_constraints": {},
@@ -21,6 +22,7 @@ Returns miner configuration constraints (min/max values).
 **Endpoint:** `GET /api/v1/configuration/miner`
 
 **Response:**
+
 ```json
 {
   "dps": {},
