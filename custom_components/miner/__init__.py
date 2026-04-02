@@ -2,6 +2,15 @@
 from __future__ import annotations
 
 import sys
+import os
+
+# Inject bundled dependencies (betterproto, pyasic, etc.) into path
+# These are packages not provided by HA or requiring specific pre-release versions
+_integration_path = os.path.dirname(os.path.abspath(__file__))
+_deps_path = os.path.join(_integration_path, "deps")
+
+if os.path.isdir(_deps_path) and _deps_path not in sys.path:
+    sys.path.insert(0, _deps_path)  # Insert first to get pre-release betterproto
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -23,52 +32,21 @@ PLATFORMS: list[Platform] = [
 
 
 def _ensure_pyasic():
-    """Ensure pyasic is installed and imported (runs in executor)."""
+    """Ensure pyasic is available (bundled version)."""
     import importlib
     
     # Apply Python 3.14 compatibility patch BEFORE importing pyasic
     from .patch import apply_pydantic_property_patch
     apply_pydantic_property_patch()
     
-    def try_import():
-        try:
-            from importlib.metadata import version
-            import pyasic
-            # Verify the module actually loaded correctly
-            if not hasattr(pyasic, 'get_miner'):
-                raise ImportError("pyasic module incomplete")
-            if version("pyasic") != PYASIC_VERSION:
-                raise ImportError("Version mismatch")
-            return pyasic
-        except Exception:
-            return None
-    
-    pyasic = try_import()
-    if pyasic:
-        # Apply patches after pyasic is loaded
-        from .patch import apply_whatsminer_power_limit_patch
-        from .patch import apply_avalonminer_web_patch
-        from .patch import apply_vnish_get_config_patch
-        apply_whatsminer_power_limit_patch()
-        apply_avalonminer_web_patch()
-        apply_vnish_get_config_patch()
-        return pyasic
-    
-    # Need to install/reinstall
-    from .patch import install_package
-    install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
-    
-    # Clear any cached broken imports
-    for mod_name in list(sys.modules.keys()):
-        if mod_name.startswith('pyasic'):
-            del sys.modules[mod_name]
-    
-    # Import after clearing cache - may still fail due to race conditions
+    # Import bundled pyasic (path already injected at module load)
     import pyasic
-    if not hasattr(pyasic, 'get_miner'):
-        raise ImportError("pyasic module loaded but incomplete")
     
-    # Apply patches after fresh install
+    # Verify the module loaded correctly
+    if not hasattr(pyasic, 'get_miner'):
+        raise ImportError("pyasic module incomplete")
+    
+    # Apply patches after pyasic is loaded
     from .patch import apply_whatsminer_power_limit_patch
     from .patch import apply_avalonminer_web_patch
     from .patch import apply_vnish_get_config_patch
