@@ -1,22 +1,23 @@
 """The Miner component services."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 
 from homeassistant.const import CONF_DEVICE_ID
-from homeassistant.core import HomeAssistant
-from homeassistant.core import ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.device_registry import (
     async_get as async_get_device_registry,
 )
-
-from .const import DOMAIN
-from .const import SERVICE_REBOOT
-from .const import SERVICE_RESTART_BACKEND
-from .const import SERVICE_SET_WORK_MODE
-
 from pyasic.config.mining import MiningModeConfig
+
+from .const import (
+    DOMAIN,
+    SERVICE_REBOOT,
+    SERVICE_RESTART_BACKEND,
+    SERVICE_SET_WORK_MODE,
+)
 
 LOGGER = logging.getLogger(__name__)
 

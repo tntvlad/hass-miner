@@ -5,6 +5,7 @@
 **Endpoint:** `GET /api/v1/upgrade/auto-upgrade`
 
 **Response:**
+
 ```json
 {
   "enabled": true,
@@ -27,6 +28,7 @@
 **Endpoint:** `PATCH /api/v1/upgrade/auto-upgrade`
 
 **Request:**
+
 ```json
 {
   "enabled": true,
@@ -45,6 +47,7 @@
 **Endpoint:** `GET /api/v1/version/`
 
 **Response:**
+
 ```json
 {
   "major": 1,

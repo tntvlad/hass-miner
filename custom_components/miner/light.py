@@ -1,8 +1,9 @@
 """Support for Avalon Miner LED light control."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -155,8 +156,12 @@ class AvalonLedLight(CoordinatorEntity[MinerCoordinator], LightEntity):
         )
 
         success = await self._api.set_led(
-            current_effect, current_white, current_intensity,
-            current_r, current_g, current_b
+            current_effect,
+            current_white,
+            current_intensity,
+            current_r,
+            current_g,
+            current_b,
         )
 
         if success:
@@ -178,7 +183,10 @@ class AvalonLedLight(CoordinatorEntity[MinerCoordinator], LightEntity):
         g = led_data.get("g", 255) if led_data else 255
         b = led_data.get("b", 255) if led_data else 255
 
-        _LOGGER.info("%s: Turning off LED (setting effect=0)", self.coordinator.config_entry.title)
+        _LOGGER.info(
+            "%s: Turning off LED (setting effect=0)",
+            self.coordinator.config_entry.title,
+        )
 
         success = await self._api.set_led(0, white, intensity, r, g, b)
 

@@ -1,8 +1,37 @@
 """Config flow for Miner."""
+
 import logging
 from importlib.metadata import version
 
-from .const import PYASIC_VERSION
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.components import network
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
+
+from .const import (
+    AVALON_MODE_FULL,
+    AVALON_MODE_SIMPLE,
+    CONF_AVALON_CONTROL_MODE,
+    CONF_IP,
+    CONF_MAX_POWER,
+    CONF_MIN_POWER,
+    CONF_RPC_PASSWORD,
+    CONF_SSH_PASSWORD,
+    CONF_SSH_USERNAME,
+    CONF_TITLE,
+    CONF_WEB_PASSWORD,
+    CONF_WEB_USERNAME,
+    DOMAIN,
+    PYASIC_VERSION,
+)
 
 # Lazy import - will be populated when needed
 pyasic = None
@@ -15,49 +44,31 @@ def _ensure_pyasic():
     global pyasic, MinerNetwork, MinerMake
     if pyasic is not None:
         return
-    
+
     # Apply Python 3.14 compatibility patch BEFORE importing pyasic
     from .patch import apply_pydantic_property_patch
+
     apply_pydantic_property_patch()
-    
+
     try:
         import pyasic as _pyasic
+
         if version("pyasic") != PYASIC_VERSION:
             raise ImportError("Version mismatch")
     except (ImportError, Exception):
         from .patch import install_package
+
         install_package(f"pyasic=={PYASIC_VERSION}")
         import pyasic as _pyasic
-    
+
     pyasic = _pyasic
     from pyasic import MinerNetwork as _MinerNetwork
+
     MinerNetwork = _MinerNetwork
     from pyasic.device.makes import MinerMake as _MinerMake
-    MinerMake = _MinerMake
-import voluptuous as vol
-from homeassistant import config_entries
-from homeassistant.components import network
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.selector import TextSelector
-from homeassistant.helpers.selector import TextSelectorConfig
-from homeassistant.helpers.selector import TextSelectorType
-from homeassistant.helpers.selector import SelectSelector
-from homeassistant.helpers.selector import SelectSelectorConfig
-from homeassistant.helpers.selector import SelectSelectorMode
 
-from .const import CONF_IP
-from .const import CONF_MIN_POWER
-from .const import CONF_MAX_POWER
-from .const import CONF_RPC_PASSWORD
-from .const import CONF_SSH_PASSWORD
-from .const import CONF_SSH_USERNAME
-from .const import CONF_TITLE
-from .const import CONF_WEB_PASSWORD
-from .const import CONF_WEB_USERNAME
-from .const import CONF_AVALON_CONTROL_MODE
-from .const import AVALON_MODE_SIMPLE
-from .const import AVALON_MODE_FULL
-from .const import DOMAIN
+    MinerMake = _MinerMake
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,10 +89,7 @@ async def _async_has_devices(hass: HomeAssistant) -> bool:
     return False
 
 
-async def validate_ip_input(
-    hass: HomeAssistant,
-    data: dict[str, str]
-):
+async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
     """Validate the user input allows us to connect."""
     await hass.async_add_executor_job(_ensure_pyasic)
     miner_ip = data.get(CONF_IP)
@@ -97,11 +105,11 @@ def _is_avalon_miner(miner) -> bool:
     """Check if miner is an Avalon miner."""
     if miner is None:
         return False
-    
+
     miner_class_name = miner.__class__.__name__.lower()
     make = str(getattr(miner, "make", "") or "").lower()
     model = str(getattr(miner, "model", "") or "").lower()
-    
+
     return "avalon" in miner_class_name or "avalon" in make or "avalon" in model
 
 
@@ -164,9 +172,11 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_RPC_PASSWORD,
                         default=user_input.get(
                             CONF_RPC_PASSWORD,
-                            self._miner.rpc.pwd
-                            if self._miner.api.pwd is not None
-                            else "",
+                            (
+                                self._miner.rpc.pwd
+                                if self._miner.api.pwd is not None
+                                else ""
+                            ),
                         ),
                     )
                 ] = TextSelector(
@@ -227,7 +237,7 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="login", data_schema=schema)
 
         self._data.update(user_input)
-        
+
         # Check if Avalon miner to show options
         if _is_avalon_miner(self._miner):
             return await self.async_step_avalon_options()
@@ -246,8 +256,14 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            {"value": AVALON_MODE_SIMPLE, "label": "Simple (pyasic only)"},
-                            {"value": AVALON_MODE_FULL, "label": "Full (CGMiner API control)"},
+                            {
+                                "value": AVALON_MODE_SIMPLE,
+                                "label": "Simple (pyasic only)",
+                            },
+                            {
+                                "value": AVALON_MODE_FULL,
+                                "label": "Full (CGMiner API control)",
+                            },
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
                     )
@@ -256,7 +272,9 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if not user_input:
-            return self.async_show_form(step_id="avalon_options", data_schema=data_schema)
+            return self.async_show_form(
+                step_id="avalon_options", data_schema=data_schema
+            )
 
         self._data.update(user_input)
         return await self.async_step_title()

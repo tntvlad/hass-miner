@@ -5,6 +5,7 @@
 **Endpoint:** `GET /api/v1/license/license`
 
 **Response:**
+
 ```json
 {
   "state": {}
@@ -18,6 +19,7 @@ States: `none`, `limited`, `valid`, `expired`
 **Endpoint:** `PUT /api/v1/license/apply-contract-key`
 
 **Request:**
+
 ```json
 {
   "contract_key": "your-license-key"
@@ -25,6 +27,7 @@ States: `none`, `limited`, `valid`, `expired`
 ```
 
 **Response:**
+
 ```json
 {
   "successful": true

@@ -1,26 +1,29 @@
 """Support for Bitcoin ASIC miners."""
+
 from __future__ import annotations
 
 import logging
-import aiohttp
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pyasic
+import aiohttp
 
-from homeassistant.components.number import NumberEntityDescription, NumberDeviceClass
-from homeassistant.components.number import NumberEntity
+if TYPE_CHECKING:
+    pass
+
+from homeassistant.components.number import (
+    NumberDeviceClass,
+    NumberEntity,
+    NumberEntityDescription,
+)
+from homeassistant.components.sensor import EntityCategory
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry
-from homeassistant.helpers import entity
+from homeassistant.const import UnitOfPower
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.components.sensor import EntityCategory
-from homeassistant.const import UnitOfPower
 
-from .const import DOMAIN, CONF_WEB_USERNAME, CONF_WEB_PASSWORD
+from .const import CONF_WEB_PASSWORD, CONF_WEB_USERNAME, DOMAIN
 from .coordinator import MinerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,7 +144,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         # Check miner type and use appropriate API
         miner_class_name = miner.__class__.__name__
         _LOGGER.debug(f"Miner class: {miner_class_name}")
-        
+
         if "BOSer" in miner_class_name or "BOS" in miner_class_name:
             # BOS miners - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))

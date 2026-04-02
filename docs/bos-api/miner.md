@@ -7,6 +7,7 @@ Get miner information and statistics.
 **Endpoint:** `GET /api/v1/miner/details`
 
 **Response:**
+
 ```json
 {
   "bos_mode": 0,
@@ -31,6 +32,7 @@ Get miner information and statistics.
 **Endpoint:** `GET /api/v1/miner/stats`
 
 **Response:**
+
 ```json
 {
   "miner_stats": {},
@@ -50,6 +52,7 @@ Status values: `unspecified`, `not_started`, `normal`, `paused`, `suspended`, `r
 **Endpoint:** `GET /api/v1/miner/errors`
 
 **Response:**
+
 ```json
 {
   "errors": []
@@ -59,12 +62,15 @@ Status values: `unspecified`, `not_started`, `normal`, `paused`, `suspended`, `r
 ## Hashboards
 
 ### Get Hashboard Details
+
 **Endpoint:** `GET /api/v1/miner/hw/hashboards`
 
 ### Enable/Disable Hashboards
+
 **Endpoint:** `PATCH /api/v1/miner/hw/hashboards`
 
 **Request:**
+
 ```json
 {
   "enable": false,
@@ -77,6 +83,7 @@ Status values: `unspecified`, `not_started`, `normal`, `paused`, `suspended`, `r
 **Endpoint:** `GET /api/v1/miner/support-archive`
 
 **Request:**
+
 ```json
 {
   "format": "zip"

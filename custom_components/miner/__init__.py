@@ -1,4 +1,5 @@
 """The Miner integration."""
+
 from __future__ import annotations
 
 import sys
@@ -8,9 +9,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import CONF_IP
-from .const import DOMAIN
-from .const import PYASIC_VERSION
+from .const import CONF_IP, DOMAIN, PYASIC_VERSION
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -24,58 +23,68 @@ PLATFORMS: list[Platform] = [
 
 def _ensure_pyasic():
     """Ensure pyasic is installed and imported (runs in executor)."""
-    import importlib
-    
+
     # Apply Python 3.14 compatibility patch BEFORE importing pyasic
     from .patch import apply_pydantic_property_patch
+
     apply_pydantic_property_patch()
-    
+
     def try_import():
         try:
             from importlib.metadata import version
+
             import pyasic
+
             # Verify the module actually loaded correctly
-            if not hasattr(pyasic, 'get_miner'):
+            if not hasattr(pyasic, "get_miner"):
                 raise ImportError("pyasic module incomplete")
             if version("pyasic") != PYASIC_VERSION:
                 raise ImportError("Version mismatch")
             return pyasic
         except Exception:
             return None
-    
+
     pyasic = try_import()
     if pyasic:
         # Apply patches after pyasic is loaded
-        from .patch import apply_whatsminer_power_limit_patch
-        from .patch import apply_avalonminer_web_patch
-        from .patch import apply_vnish_get_config_patch
+        from .patch import (
+            apply_avalonminer_web_patch,
+            apply_vnish_get_config_patch,
+            apply_whatsminer_power_limit_patch,
+        )
+
         apply_whatsminer_power_limit_patch()
         apply_avalonminer_web_patch()
         apply_vnish_get_config_patch()
         return pyasic
-    
+
     # Need to install/reinstall
     from .patch import install_package
+
     install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
-    
+
     # Clear any cached broken imports
     for mod_name in list(sys.modules.keys()):
-        if mod_name.startswith('pyasic'):
+        if mod_name.startswith("pyasic"):
             del sys.modules[mod_name]
-    
+
     # Import after clearing cache - may still fail due to race conditions
     import pyasic
-    if not hasattr(pyasic, 'get_miner'):
+
+    if not hasattr(pyasic, "get_miner"):
         raise ImportError("pyasic module loaded but incomplete")
-    
+
     # Apply patches after fresh install
-    from .patch import apply_whatsminer_power_limit_patch
-    from .patch import apply_avalonminer_web_patch
-    from .patch import apply_vnish_get_config_patch
+    from .patch import (
+        apply_avalonminer_web_patch,
+        apply_vnish_get_config_patch,
+        apply_whatsminer_power_limit_patch,
+    )
+
     apply_whatsminer_power_limit_patch()
     apply_avalonminer_web_patch()
     apply_vnish_get_config_patch()
-    
+
     return pyasic
 
 
@@ -87,7 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     except (ImportError, KeyError) as err:
         # Clear broken modules so next retry has fresh start
         for mod_name in list(sys.modules.keys()):
-            if mod_name.startswith('pyasic'):
+            if mod_name.startswith("pyasic"):
                 del sys.modules[mod_name]
         raise ConfigEntryNotReady(f"pyasic import failed: {err}") from err
 

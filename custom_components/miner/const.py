@@ -15,7 +15,7 @@ CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 
 # Avalon control mode options
 AVALON_MODE_SIMPLE = "simple"  # Native pyasic only
-AVALON_MODE_FULL = "full"      # Full CGMiner API control (workmode, LED, mining switch)
+AVALON_MODE_FULL = "full"  # Full CGMiner API control (workmode, LED, mining switch)
 
 SERVICE_REBOOT = "reboot"
 SERVICE_RESTART_BACKEND = "restart_backend"

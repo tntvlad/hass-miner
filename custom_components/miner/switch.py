@@ -1,18 +1,19 @@
 """Support for Miner shutdown."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL
+from .const import AVALON_MODE_FULL, CONF_AVALON_CONTROL_MODE, DOMAIN
 from .coordinator import MinerCoordinator, _is_avalon_nano_miner
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,20 +34,20 @@ async def async_setup_entry(
         created.add(key)
 
     await coordinator.async_config_entry_first_refresh()
-    
+
     entities = []
-    
+
     # Standard miner active switch (uses pyasic)
     if coordinator.miner.supports_shutdown:
         entities.append(MinerActiveSwitch(coordinator=coordinator))
-    
+
     # Check if user wants full CGMiner control for Avalon miners
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
-    
+
     # Avalon Nano 3s mining switch (uses CGMiner API) - only in full mode
     if _is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
         entities.append(AvalonMiningSwitch(coordinator=coordinator))
-    
+
     if entities:
         async_add_entities(entities)
 
@@ -92,8 +93,10 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             await miner.resume_mining()
         except Exception as err:
             # VNish and some firmwares return empty response but still work
-            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Resume API returned error (expected for VNish): {err}")
-        
+            _LOGGER.debug(
+                f"{self.coordinator.config_entry.title}: Resume API returned error (expected for VNish): {err}"
+            )
+
         # Try to restore mining mode config - skip if not supported or fails
         try:
             if miner.supports_power_modes and self._last_mining_mode:
@@ -101,8 +104,10 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
                 config.mining_mode = self._last_mining_mode
                 await miner.send_config(config)
         except Exception as err:
-            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Could not restore config (expected for some firmwares): {err}")
-        
+            _LOGGER.debug(
+                f"{self.coordinator.config_entry.title}: Could not restore config (expected for some firmwares): {err}"
+            )
+
         self.updating_switch = True
         self.async_write_ha_state()
 
@@ -112,20 +117,26 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
         _LOGGER.debug(f"{self.coordinator.config_entry.title}: Stop mining.")
         if not miner.supports_shutdown:
             raise TypeError(f"{miner}: Shutdown not supported.")
-        
+
         # Try to save mining mode config - skip if not supported or fails
         try:
             if miner.supports_power_modes:
-                self._last_mining_mode = self.coordinator.data.get("config", {}).mining_mode if self.coordinator.data.get("config") else None
+                self._last_mining_mode = (
+                    self.coordinator.data.get("config", {}).mining_mode
+                    if self.coordinator.data.get("config")
+                    else None
+                )
         except Exception:
             self._last_mining_mode = None
-        
+
         self._attr_is_on = False
         try:
             await miner.stop_mining()
         except Exception as err:
             # VNish and some firmwares return empty response but still work
-            _LOGGER.debug(f"{self.coordinator.config_entry.title}: Stop API returned error (expected for VNish): {err}")
+            _LOGGER.debug(
+                f"{self.coordinator.config_entry.title}: Stop API returned error (expected for VNish): {err}"
+            )
         self.updating_switch = True
         self.async_write_ha_state()
 
@@ -195,21 +206,21 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             await writer.drain()
 
             raw = b""
-            try:
+            with contextlib.suppress(asyncio.TimeoutError):
                 raw = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except asyncio.TimeoutError:
-                pass
 
             writer.close()
             await writer.wait_closed()
 
             response = raw.decode("utf-8", errors="ignore")
             _LOGGER.debug("CGMiner response for '%s': %s", command, response)
-            
+
             # Check for success - STATUS=S (success) or STATUS=I (info)
             # Also check for error messages
             if "STATUS=E" in response:
-                _LOGGER.warning("CGMiner command '%s' returned error: %s", command, response)
+                _LOGGER.warning(
+                    "CGMiner command '%s' returned error: %s", command, response
+                )
                 return False
             return "STATUS=S" in response or "STATUS=I" in response or len(response) > 0
 
@@ -219,8 +230,10 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
 
     async def async_turn_on(self) -> None:
         """Enable mining (ascenable)."""
-        _LOGGER.info("%s: Enabling mining via CGMiner API", self.coordinator.config_entry.title)
-        
+        _LOGGER.info(
+            "%s: Enabling mining via CGMiner API", self.coordinator.config_entry.title
+        )
+
         success = await self._send_cgminer_command("ascenable|0")
         if success:
             self._attr_is_on = True
@@ -232,8 +245,10 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
 
     async def async_turn_off(self) -> None:
         """Disable mining (ascdisable)."""
-        _LOGGER.info("%s: Disabling mining via CGMiner API", self.coordinator.config_entry.title)
-        
+        _LOGGER.info(
+            "%s: Disabling mining via CGMiner API", self.coordinator.config_entry.title
+        )
+
         success = await self._send_cgminer_command("ascdisable|0")
         if success:
             self._attr_is_on = False

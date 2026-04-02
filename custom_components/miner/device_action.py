@@ -1,22 +1,22 @@
 """Provides device actions for Miner."""
+
 from __future__ import annotations
 
 import logging
 
 import voluptuous as vol
 from homeassistant.components.device_automation import async_validate_entity_schema
-from homeassistant.const import CONF_DEVICE_ID
-from homeassistant.const import CONF_DOMAIN
-from homeassistant.const import CONF_TYPE
-from homeassistant.core import Context
-from homeassistant.core import HomeAssistant
+from homeassistant.const import CONF_DEVICE_ID, CONF_DOMAIN, CONF_TYPE
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
-from .const import SERVICE_REBOOT
-from .const import SERVICE_RESTART_BACKEND
-from .const import SERVICE_SET_WORK_MODE
+from .const import (
+    DOMAIN,
+    SERVICE_REBOOT,
+    SERVICE_RESTART_BACKEND,
+    SERVICE_SET_WORK_MODE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

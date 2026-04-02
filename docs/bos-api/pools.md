@@ -7,6 +7,7 @@ Pool configuration management.
 **Endpoint:** `GET /api/v1/pools/`
 
 **Response:**
+
 ```json
 [
   {
@@ -23,6 +24,7 @@ Pool configuration management.
 **Endpoint:** `POST /api/v1/pools/`
 
 **Request:**
+
 ```json
 {
   "name": "My Pool",
@@ -54,6 +56,7 @@ Pool configuration management.
 Replace all pool groups at once.
 
 **Request:**
+
 ```json
 [
   {
