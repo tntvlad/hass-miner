@@ -21,3 +21,7 @@ config/*
 
 # Downloaded pyasic source for analysis
 pyasic/
+
+# HAR files for API analysis (may contain sensitive data)
+har_files/*.har
+har_files/*.json

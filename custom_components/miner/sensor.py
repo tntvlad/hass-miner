@@ -23,34 +23,10 @@ from .const import JOULES_PER_TERA_HASH
 from .const import TERA_HASH_PER_SECOND
 from .coordinator import MinerCoordinator
 from .coordinator import _is_avalon_nano_miner
+from .coordinator import _is_vnish_miner
+from .coordinator import _is_bos_miner
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def format_difficulty(value: int | float | None) -> tuple[float | None, str]:
-    """Format difficulty value with appropriate unit suffix.
-    
-    Returns tuple of (scaled_value, unit_suffix).
-    Units: K (10^3), M (10^6), G (10^9), T (10^12), P (10^15), E (10^18), Z (10^21)
-    """
-    if value is None:
-        return None, ""
-    
-    units = [
-        (1e21, "Z"),  # Zetta
-        (1e18, "E"),  # Exa
-        (1e15, "P"),  # Peta
-        (1e12, "T"),  # Tera
-        (1e9, "G"),   # Giga
-        (1e6, "M"),   # Mega
-        (1e3, "K"),   # Kilo
-    ]
-    
-    for divisor, suffix in units:
-        if value >= divisor:
-            return round(value / divisor, 2), suffix
-    
-    return value, ""
 
 
 ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
@@ -208,6 +184,32 @@ async def async_setup_entry(
             if description:
                 sensors.append(
                     AvalonSensor(
+                        coordinator=coordinator,
+                        sensor=sensor_key,
+                        entity_description=description,
+                    )
+                )
+
+    # Add VNish-specific sensors (Best Share, Found Blocks)
+    if _is_vnish_miner(coordinator.miner):
+        for sensor_key in ["best_share", "found_blocks"]:
+            description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
+            if description:
+                sensors.append(
+                    VNishSensor(
+                        coordinator=coordinator,
+                        sensor=sensor_key,
+                        entity_description=description,
+                    )
+                )
+
+    # Add BOS-specific sensors (Best Share, Found Blocks)
+    if _is_bos_miner(coordinator.miner):
+        for sensor_key in ["best_share", "found_blocks"]:
+            description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
+            if description:
+                sensors.append(
+                    BOSSensor(
                         coordinator=coordinator,
                         sensor=sensor_key,
                         entity_description=description,
@@ -382,8 +384,6 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     """Defines an Avalon-specific Sensor (Best Share, Found Blocks)."""
 
     entity_description: SensorEntityDescription
-    _scaled_value: float | None = None
-    _unit_suffix: str = ""
 
     def __init__(
         self,
@@ -425,20 +425,113 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
-        raw_value = self._sensor_data
-        if self._sensor == "best_share" and raw_value is not None:
-            scaled, suffix = format_difficulty(raw_value)
-            self._scaled_value = scaled
-            self._unit_suffix = suffix
-            return scaled
-        return raw_value
+        return self._sensor_data
 
     @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement for best_share with auto-scaling."""
-        if self._sensor == "best_share" and self._unit_suffix:
-            return self._unit_suffix
-        return self.entity_description.native_unit_of_measurement
+    def available(self) -> bool:
+        """Return if entity is available or not."""
+        return self.coordinator.available
+
+
+class VNishSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
+    """Defines a VNish-specific Sensor (Best Share, Found Blocks)."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: MinerCoordinator,
+        sensor: str,
+        entity_description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator=coordinator)
+        self._attr_unique_id = f"{self.coordinator.data['mac']}-vnish-{sensor}"
+        self._sensor = sensor
+        self.entity_description = entity_description
+
+    @property
+    def _sensor_data(self):
+        """Return sensor data."""
+        if self._sensor == "best_share":
+            return self.coordinator.data.get("vnish_best_share")
+        elif self._sensor == "found_blocks":
+            return self.coordinator.data.get("vnish_found_blocks")
+        return None
+
+    @property
+    def name(self) -> str | None:
+        """Return name of the entity."""
+        return f"{self.coordinator.config_entry.title} {self.entity_description.key}"
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        """Return device info."""
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data["mac"])},
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state of the sensor."""
+        return self._sensor_data
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available or not."""
+        return self.coordinator.available
+
+
+class BOSSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
+    """Defines a BOS (Braiins OS)-specific Sensor (Best Share, Found Blocks)."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: MinerCoordinator,
+        sensor: str,
+        entity_description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator=coordinator)
+        self._attr_unique_id = f"{self.coordinator.data['mac']}-bos-{sensor}"
+        self._sensor = sensor
+        self.entity_description = entity_description
+
+    @property
+    def _sensor_data(self):
+        """Return sensor data."""
+        if self._sensor == "best_share":
+            return self.coordinator.data.get("bos_best_share")
+        elif self._sensor == "found_blocks":
+            return self.coordinator.data.get("bos_found_blocks")
+        return None
+
+    @property
+    def name(self) -> str | None:
+        """Return name of the entity."""
+        return f"{self.coordinator.config_entry.title} {self.entity_description.key}"
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        """Return device info."""
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data["mac"])},
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state of the sensor."""
+        return self._sensor_data
 
     @property
     def available(self) -> bool:
