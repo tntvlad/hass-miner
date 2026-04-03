@@ -22,7 +22,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, JOULES_PER_TERA_HASH, TERA_HASH_PER_SECOND
 from .coordinator import MinerCoordinator, _is_avalon_nano_miner
 from .coordinator import _is_vnish_miner
-from .coordinator import _is_bos_miner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -201,18 +200,6 @@ async def async_setup_entry(
                     )
                 )
 
-    # Add BOS-specific sensors (Best Share, Found Blocks)
-    if _is_bos_miner(coordinator.miner):
-        for sensor_key in ["best_share", "found_blocks"]:
-            description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
-            if description:
-                sensors.append(
-                    BOSSensor(
-                        coordinator=coordinator,
-                        sensor=sensor_key,
-                        entity_description=description,
-                    )
-                )
 
     async_add_entities(sensors)
 
@@ -453,59 +440,6 @@ class VNishSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
             return self.coordinator.data.get("vnish_best_share")
         elif self._sensor == "found_blocks":
             return self.coordinator.data.get("vnish_found_blocks")
-        return None
-
-    @property
-    def name(self) -> str | None:
-        """Return name of the entity."""
-        return f"{self.coordinator.config_entry.title} {self.entity_description.key}"
-
-    @property
-    def device_info(self) -> entity.DeviceInfo:
-        """Return device info."""
-        return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            manufacturer=self.coordinator.data["make"],
-            model=self.coordinator.data["model"],
-            sw_version=self.coordinator.data["fw_ver"],
-            name=f"{self.coordinator.config_entry.title}",
-        )
-
-    @property
-    def native_value(self) -> StateType:
-        """Return the state of the sensor."""
-        return self._sensor_data
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available or not."""
-        return self.coordinator.available
-
-
-class BOSSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
-    """Defines a BOS (Braiins OS)-specific Sensor (Best Share, Found Blocks)."""
-
-    entity_description: SensorEntityDescription
-
-    def __init__(
-        self,
-        coordinator: MinerCoordinator,
-        sensor: str,
-        entity_description: SensorEntityDescription,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.data['mac']}-bos-{sensor}"
-        self._sensor = sensor
-        self.entity_description = entity_description
-
-    @property
-    def _sensor_data(self):
-        """Return sensor data."""
-        if self._sensor == "best_share":
-            return self.coordinator.data.get("bos_best_share")
-        elif self._sensor == "found_blocks":
-            return self.coordinator.data.get("bos_found_blocks")
         return None
 
     @property
