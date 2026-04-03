@@ -58,6 +58,10 @@ DEFAULT_DATA = {
     "avalon_found_blocks": None,
     "avalon_asc_enabled": None,
     "vnish_preset": None,
+    "vnish_best_share": None,
+    "vnish_found_blocks": None,
+    "bos_best_share": None,
+    "bos_found_blocks": None,
 }
 
 
@@ -251,6 +255,116 @@ async def _fetch_vnish_preset(ip: str, password: str = "admin") -> str | None:
     return None
 
 
+async def _fetch_vnish_summary(ip: str, password: str = "admin") -> dict | None:
+    """Fetch summary data (Best Share, Found Blocks) from VNish miner via REST API."""
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Unlock and get auth token
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                token = (await resp.json()).get("token")
+                if not token:
+                    return None
+
+            # Get summary data
+            async with session.get(
+                f"{base_url}/summary",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                summary = await resp.json()
+                result = {}
+                # VNish API returns best_share and found_blocks in miner object
+                if "miner" in summary:
+                    miner_data = summary["miner"]
+                    if "best_share" in miner_data:
+                        result["best_share"] = int(miner_data["best_share"])
+                    if "found_blocks" in miner_data:
+                        result["found_blocks"] = int(miner_data["found_blocks"])
+                return result if result else None
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch VNish summary: %s", e)
+    return None
+
+
+async def _fetch_bos_summary(ip: str, timeout: int = 10) -> dict | None:
+    """Fetch summary data (Best Share, Found Blocks) from BOS miner via CGMiner API."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 4028),
+            timeout=timeout,
+        )
+        writer.write(b'summary')
+        await writer.drain()
+
+        raw = b""
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            raw += chunk
+
+        writer.close()
+        await writer.wait_closed()
+
+        response = raw.decode("utf-8", errors="ignore")
+
+        result = {}
+
+        # Parse Best Share
+        best_share_match = re.search(r"Best Share=(\d+)", response)
+        if best_share_match:
+            result["best_share"] = int(best_share_match.group(1))
+
+        # Parse Found Blocks
+        found_blocks_match = re.search(r"Found Blocks=(\d+)", response)
+        if found_blocks_match:
+            result["found_blocks"] = int(found_blocks_match.group(1))
+
+        return result if result else None
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch BOS summary: %s", e)
+    return None
+
+
+def _is_vnish_miner(miner) -> bool:
+    """Check if miner is running VNish firmware."""
+    if miner is None:
+        return False
+    if miner.web is not None:
+        return type(miner.web).__name__ == "VNishWebAPI"
+    return False
+
+
+def _is_bos_miner(miner) -> bool:
+    """Check if miner is running BOS (Braiins OS) firmware."""
+    if miner is None:
+        return False
+    miner_class_name = miner.__class__.__name__.lower()
+    fw_ver = str(getattr(miner, "fw_ver", "") or "").lower()
+    # Check for BOS/Braiins indicators
+    if "bos" in miner_class_name or "braiins" in miner_class_name:
+        return True
+    if "bos" in fw_ver or "braiins" in fw_ver:
+        return True
+    # Check web API type
+    if miner.web is not None:
+        web_type = type(miner.web).__name__.lower()
+        if "bos" in web_type or "braiins" in web_type:
+            return True
+    return False
+
+
 class MinerCoordinator(DataUpdateCoordinator):
     """Class to manage fetching update data from the Miner."""
 
@@ -420,6 +534,23 @@ class MinerCoordinator(DataUpdateCoordinator):
         except TypeError:
             expected_hashrate = None
 
+        # pyasic uses raw hashrate for efficiency_fract; if the API reports H/s in a
+        # shape that doesn't match TH/s, the ratio can round to 0.0 while normalized
+        # hashrate (above) matches the miner UI. Prefer W / TH/s from normalized data.
+        efficiency: float | None
+        try:
+            w = miner_data.wattage
+            if (
+                w is not None
+                and hashrate is not None
+                and float(hashrate) > 0
+            ):
+                efficiency = round(float(w) / float(hashrate), 2)
+            else:
+                efficiency = miner_data.efficiency_fract
+        except (TypeError, ValueError, ZeroDivisionError):
+            efficiency = miner_data.efficiency_fract
+
         try:
             active_preset = miner_data.config.mining_mode.active_preset.name
         except AttributeError:
@@ -440,7 +571,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "temperature": miner_data.temperature_avg,
                 "power_limit": miner_data.wattage_limit,
                 "miner_consumption": miner_data.wattage,
-                "efficiency": miner_data.efficiency_fract,
+                "efficiency": efficiency,
             },
             "board_sensors": {
                 board.slot: {
@@ -464,6 +595,10 @@ class MinerCoordinator(DataUpdateCoordinator):
             "avalon_found_blocks": None,
             "avalon_asc_enabled": None,
             "vnish_preset": None,
+            "vnish_best_share": None,
+            "vnish_found_blocks": None,
+            "bos_best_share": None,
+            "bos_found_blocks": None,
         }
 
         # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
@@ -507,5 +642,30 @@ class MinerCoordinator(DataUpdateCoordinator):
             )
             if vnish_preset:
                 data["vnish_preset"] = vnish_preset
+
+        # Fetch VNish preset and summary for VNish firmware miners
+        if _is_vnish_miner(self.miner):
+            vnish_preset = await _fetch_vnish_preset(
+                self.miner.ip,
+                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
+            )
+            if vnish_preset:
+                data["vnish_preset"] = vnish_preset
+
+            # Fetch VNish summary data (Best Share, Found Blocks)
+            vnish_summary = await _fetch_vnish_summary(
+                self.miner.ip,
+                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
+            )
+            if vnish_summary:
+                data["vnish_best_share"] = vnish_summary.get("best_share")
+                data["vnish_found_blocks"] = vnish_summary.get("found_blocks")
+
+        # Fetch BOS summary data (Best Share, Found Blocks) for BOS firmware miners
+        if _is_bos_miner(self.miner):
+            bos_summary = await _fetch_bos_summary(self.miner.ip)
+            if bos_summary:
+                data["bos_best_share"] = bos_summary.get("best_share")
+                data["bos_found_blocks"] = bos_summary.get("found_blocks")
 
         return data
