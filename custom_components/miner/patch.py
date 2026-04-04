@@ -96,11 +96,11 @@ def install_package(
 
 def apply_pydantic_property_patch():
     """Patch pydantic to handle property objects in Python 3.14+.
-    
+
     Python 3.14 changed how property objects are represented in type annotations.
     This causes pydantic's schema generation to fail when it encounters
     @computed_field + @property decorated methods in pyasic's MinerData class.
-    
+
     This patch modifies pydantic's _unknown_type_schema to return Any schema
     for property objects instead of raising an error.
     """
