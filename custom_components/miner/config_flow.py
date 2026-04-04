@@ -2,12 +2,38 @@
 import logging
 from importlib.metadata import version
 
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.components import network
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.selector import TextSelector
+from homeassistant.helpers.selector import TextSelectorConfig
+from homeassistant.helpers.selector import TextSelectorType
+from homeassistant.helpers.selector import SelectSelector
+from homeassistant.helpers.selector import SelectSelectorConfig
+from homeassistant.helpers.selector import SelectSelectorMode
+
 from .const import PYASIC_VERSION
+from .const import CONF_IP
+from .const import CONF_MIN_POWER
+from .const import CONF_MAX_POWER
+from .const import CONF_RPC_PASSWORD
+from .const import CONF_SSH_PASSWORD
+from .const import CONF_SSH_USERNAME
+from .const import CONF_TITLE
+from .const import CONF_WEB_PASSWORD
+from .const import CONF_WEB_USERNAME
+from .const import CONF_AVALON_CONTROL_MODE
+from .const import AVALON_MODE_SIMPLE
+from .const import AVALON_MODE_FULL
+from .const import DOMAIN
 
 # Lazy import - will be populated when needed
 pyasic = None
 MinerNetwork = None
 MinerMake = None
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _ensure_pyasic():
@@ -34,32 +60,6 @@ def _ensure_pyasic():
     MinerNetwork = _MinerNetwork
     from pyasic.device.makes import MinerMake as _MinerMake
     MinerMake = _MinerMake
-import voluptuous as vol
-from homeassistant import config_entries
-from homeassistant.components import network
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.selector import TextSelector
-from homeassistant.helpers.selector import TextSelectorConfig
-from homeassistant.helpers.selector import TextSelectorType
-from homeassistant.helpers.selector import SelectSelector
-from homeassistant.helpers.selector import SelectSelectorConfig
-from homeassistant.helpers.selector import SelectSelectorMode
-
-from .const import CONF_IP
-from .const import CONF_MIN_POWER
-from .const import CONF_MAX_POWER
-from .const import CONF_RPC_PASSWORD
-from .const import CONF_SSH_PASSWORD
-from .const import CONF_SSH_USERNAME
-from .const import CONF_TITLE
-from .const import CONF_WEB_PASSWORD
-from .const import CONF_WEB_USERNAME
-from .const import CONF_AVALON_CONTROL_MODE
-from .const import AVALON_MODE_SIMPLE
-from .const import AVALON_MODE_FULL
-from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def _async_has_devices(hass: HomeAssistant) -> bool:

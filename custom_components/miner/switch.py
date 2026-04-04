@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from homeassistant.components.switch import SwitchEntity
@@ -195,10 +196,8 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             await writer.drain()
 
             raw = b""
-            try:
+            with contextlib.suppress(asyncio.TimeoutError):
                 raw = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except asyncio.TimeoutError:
-                pass
 
             writer.close()
             await writer.wait_closed()
