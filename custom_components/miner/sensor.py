@@ -20,8 +20,7 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, JOULES_PER_TERA_HASH, TERA_HASH_PER_SECOND
-from .coordinator import MinerCoordinator, _is_avalon_nano_miner
-from .coordinator import _is_vnish_miner
+from .coordinator import MinerCoordinator, _is_avalon_nano_miner, _is_vnish_miner
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -2,6 +2,7 @@
 
 target-version = "py310"
 
+[lint]
 select = [
     "I",       # isort (compatible with black; replaces reorder-python-imports)
     "B007",    # Loop control variable {name} not used within loop body
