@@ -24,8 +24,6 @@ PLATFORMS: list[Platform] = [
 
 def _ensure_pyasic():
     """Ensure pyasic is installed and imported (runs in executor)."""
-    import importlib
-
     # Apply Python 3.14 compatibility patch BEFORE importing pyasic
     from .patch import apply_pydantic_property_patch
     apply_pydantic_property_patch()

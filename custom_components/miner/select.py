@@ -139,7 +139,7 @@ class AvalonCGMinerAPI:
 
     async def set_led(self, effect: int, white: int, intensity: int, r: int, g: int, b: int) -> bool:
         """Set LED using ascset command.
-        
+
         Format: effect-W-intensity-R-G-B (WRGB LED strip)
         - effect: LED effect mode (0=off, 1=stay, 2=flash, 3=breathing, 4=loop)
         - white: White channel brightness (0-100)
