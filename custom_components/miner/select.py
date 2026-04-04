@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -46,7 +46,7 @@ class AvalonCGMinerAPI:
         self.port = port
         self.timeout = timeout
 
-    async def _send_command(self, command: str) -> Optional[str]:
+    async def _send_command(self, command: str) -> str | None:
         """Send a command to the CGMiner API and return the response."""
         try:
             reader, writer = await asyncio.wait_for(
@@ -72,7 +72,7 @@ class AvalonCGMinerAPI:
             _LOGGER.error("CGMiner command '%s' failed: %s", command, e)
             return None
 
-    async def get_workmode(self) -> Optional[int]:
+    async def get_workmode(self) -> int | None:
         """Get current workmode from estats command."""
         raw = await self._send_command("estats")
         if not raw:
@@ -94,7 +94,7 @@ class AvalonCGMinerAPI:
         # Check for success status
         return "STATUS=S" in raw or "success" in raw.lower()
 
-    async def get_summary(self) -> Dict[str, Any]:
+    async def get_summary(self) -> dict[str, Any]:
         """Get mining summary (Best Share, Found Blocks, etc)."""
         raw = await self._send_command("summary")
         if not raw:
@@ -115,7 +115,7 @@ class AvalonCGMinerAPI:
                 result[key] = value
         return result
 
-    async def get_led_state(self) -> Dict[str, Any]:
+    async def get_led_state(self) -> dict[str, Any]:
         """Get LED state from estats command."""
         raw = await self._send_command("estats")
         if not raw:
@@ -163,16 +163,16 @@ def is_avalon_nano_miner(miner) -> bool:
     """Check if miner is an Avalon Nano (supports workmode)."""
     if miner is None:
         return False
-    
+
     miner_class_name = miner.__class__.__name__.lower()
     model = getattr(miner, "model", "") or ""
     make = getattr(miner, "make", "") or ""
-    
+
     # Check for Avalon Nano models
     if "avalon" in miner_class_name.lower() or "avalon" in make.lower():
         if "nano" in model.lower() or "nano" in miner_class_name.lower():
             return True
-    
+
     return False
 
 
@@ -190,7 +190,7 @@ async def async_setup_entry(
 
     # Check if user wants full CGMiner control for Avalon miners
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
-    
+
     # Add workmode and LED effect select for Avalon Nano miners (only in full mode)
     if is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
         _LOGGER.info(
@@ -215,7 +215,7 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         """Initialize the workmode select entity."""
         super().__init__(coordinator=coordinator)
         self._api = AvalonCGMinerAPI(coordinator.data["ip"])
-        self._current_mode: Optional[str] = None
+        self._current_mode: str | None = None
 
     @property
     def name(self) -> str | None:
@@ -308,8 +308,8 @@ class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         """Initialize the LED effect select entity."""
         super().__init__(coordinator=coordinator)
         self._api = AvalonCGMinerAPI(coordinator.data["ip"])
-        self._current_effect: Optional[str] = "Stay"
-        self._led_state: Dict[str, Any] = {}
+        self._current_effect: str | None = "Stay"
+        self._led_state: dict[str, Any] = {}
 
     @property
     def name(self) -> str | None:

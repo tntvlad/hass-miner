@@ -15,11 +15,11 @@ def _ensure_pyasic():
     global pyasic, MinerNetwork, MinerMake
     if pyasic is not None:
         return
-    
+
     # Apply Python 3.14 compatibility patch BEFORE importing pyasic
     from .patch import apply_pydantic_property_patch
     apply_pydantic_property_patch()
-    
+
     try:
         import pyasic as _pyasic
         if version("pyasic") != PYASIC_VERSION:
@@ -28,7 +28,7 @@ def _ensure_pyasic():
         from .patch import install_package
         install_package(f"pyasic=={PYASIC_VERSION}")
         import pyasic as _pyasic
-    
+
     pyasic = _pyasic
     from pyasic import MinerNetwork as _MinerNetwork
     MinerNetwork = _MinerNetwork
@@ -97,11 +97,11 @@ def _is_avalon_miner(miner) -> bool:
     """Check if miner is an Avalon miner."""
     if miner is None:
         return False
-    
+
     miner_class_name = miner.__class__.__name__.lower()
     make = str(getattr(miner, "make", "") or "").lower()
     model = str(getattr(miner, "model", "") or "").lower()
-    
+
     return "avalon" in miner_class_name or "avalon" in make or "avalon" in model
 
 
@@ -227,7 +227,7 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="login", data_schema=schema)
 
         self._data.update(user_input)
-        
+
         # Check if Avalon miner to show options
         if _is_avalon_miner(self._miner):
             return await self.async_step_avalon_options()

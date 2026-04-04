@@ -105,24 +105,24 @@ def apply_pydantic_property_patch():
     for property objects instead of raising an error.
     """
     import sys
-    
+
     # Only needed for Python 3.14+
     if sys.version_info < (3, 14):
         _PATCH_LOGGER.debug("Python < 3.14, skipping pydantic property patch")
         return True
-    
+
     try:
         from pydantic._internal import _generate_schema
         from pydantic_core import core_schema
-        
+
         # Check if already patched
         if hasattr(_generate_schema, '_hass_property_patched'):
             _PATCH_LOGGER.debug("Pydantic already patched for property handling")
             return True
-        
+
         # Store original method
         original_unknown_type_schema = _generate_schema.GenerateSchema._unknown_type_schema
-        
+
         def patched_unknown_type_schema(self, obj):
             """Handle property objects gracefully instead of raising error."""
             # If it's a property object, return an Any schema
@@ -132,13 +132,13 @@ def apply_pydantic_property_patch():
                 return core_schema.any_schema()
             # Otherwise use original implementation
             return original_unknown_type_schema(self, obj)
-        
+
         # Apply patch
         _generate_schema.GenerateSchema._unknown_type_schema = patched_unknown_type_schema
         _generate_schema._hass_property_patched = True
         _PATCH_LOGGER.info("Applied pydantic property patch for Python 3.14 compatibility")
         return True
-        
+
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply pydantic property patch: {e}")
         return False

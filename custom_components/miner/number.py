@@ -6,7 +6,7 @@ import aiohttp
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import pyasic
+    pass
 
 from homeassistant.components.number import NumberEntityDescription, NumberDeviceClass
 from homeassistant.components.number import NumberEntity
@@ -131,7 +131,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         # Check miner type and use appropriate API
         miner_class_name = miner.__class__.__name__
         _LOGGER.debug(f"Miner class: {miner_class_name}")
-        
+
         if "BOSer" in miner_class_name or "BOS" in miner_class_name:
             # BOS miners - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))
