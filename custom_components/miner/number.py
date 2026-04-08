@@ -126,6 +126,38 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         """Return device unit of measurement."""
         return "W"
 
+    def _is_bos_miner(self) -> bool:
+        """Check if miner is running BrainOS (Braiins OS) firmware."""
+        miner = self.coordinator.miner
+        if miner is None:
+            return False
+
+        # Check miner class name
+        miner_class_name = miner.__class__.__name__
+        if "BOSer" in miner_class_name or "BOS" in miner_class_name:
+            return True
+
+        # Check web API type (BOSMinerWebAPI or similar)
+        if miner.web is not None:
+            web_type = type(miner.web).__name__
+            if "BOS" in web_type or "Braiins" in web_type:
+                return True
+
+        # Check firmware version string for BrainOS patterns
+        fw_ver = str(self.coordinator.data.get("fw_ver", "") or "").lower()
+        # BrainOS firmware often has patterns like "2026-02-13-0-db69f9bc-26.01-plus"
+        # or contains "braiins", "bos", etc.
+        if any(pattern in fw_ver for pattern in ["braiins", "bos+", "bos-", "-plus"]):
+            return True
+
+        # Check if firmware looks like a BrainOS date-based version
+        # Pattern: YYYY-MM-DD followed by hash and version
+        import re
+        if re.match(r"\d{4}-\d{2}-\d{2}-\d+-[a-f0-9]+-\d+\.\d+", fw_ver):
+            return True
+
+        return False
+
     async def async_set_native_value(self, value):
         """Update the current value."""
         import pyasic  # lazy import to avoid blocking event loop
@@ -143,9 +175,15 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
         # Check miner type and use appropriate API
         miner_class_name = miner.__class__.__name__
-        _LOGGER.debug(f"Miner class: {miner_class_name}")
+        web_type = type(miner.web).__name__ if miner.web else "None"
+        fw_ver = self.coordinator.data.get("fw_ver", "")
+        is_bos = self._is_bos_miner()
 
-        if "BOSer" in miner_class_name or "BOS" in miner_class_name:
+        _LOGGER.debug(
+            f"Miner class: {miner_class_name}, web: {web_type}, fw: {fw_ver}, is_bos: {is_bos}"
+        )
+
+        if is_bos:
             # BOS miners - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))
         else:
@@ -176,7 +214,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
                     login_data = await resp.json()
                     token = login_data.get("token")
 
-                # Set power target (no "Bearer" prefix for BOS API)
+                # Set power target (token only, no Bearer prefix for BOS API)
                 async with session.put(
                     f"http://{ip}/api/v1/performance/power-target",
                     json={"watt": watt},
