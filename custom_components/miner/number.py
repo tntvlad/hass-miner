@@ -160,18 +160,18 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
     def _bos_supports_rest_api(self) -> bool:
         """Check if BOS firmware supports REST API (introduced in 23.03).
-        
+
         Older firmware like 22.08.1 uses CGminer API instead.
         REST API was introduced in BOS version 23.03.
-        
+
         Firmware version formats:
         - Old style: "22.08.1" (YY.MM.patch)
         - New style: "2026-02-13-0-db69f9bc-26.01-plus" (date-hash-YY.MM-edition)
         """
         import re
-        
+
         fw_ver = str(self.coordinator.data.get("fw_ver", "") or "")
-        
+
         # Try to extract version number
         # New format: "2026-02-13-0-db69f9bc-26.01-plus" -> extract "26.01"
         new_format_match = re.search(r"-(\d{2})\.(\d{2})(?:-|$)", fw_ver)
@@ -182,7 +182,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
             if year > 23 or (year == 23 and month >= 3):
                 return True
             return False
-        
+
         # Old format: "22.08.1" or "22.08" -> extract year and month
         old_format_match = re.match(r"^(\d{2})\.(\d{2})", fw_ver)
         if old_format_match:
@@ -192,7 +192,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
             if year > 23 or (year == 23 and month >= 3):
                 return True
             return False
-        
+
         # Unknown format - assume modern firmware supports REST API
         _LOGGER.debug(f"Unknown BOS firmware format: {fw_ver}, assuming REST API support")
         return True
@@ -241,36 +241,36 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
     async def _set_power_via_cgminer(self, watt: int) -> bool:
         """Set power target using CGminer API (for older BOS firmware <23.03).
-        
+
         Uses the ascset command: ascset|0,power,<watt>
         CGminer API runs on port 4028.
         """
         import asyncio
-        
+
         ip = self.coordinator.data["ip"]
         port = 4028
-        
+
         # CGminer command to set power limit
         command = f"ascset|0,power,{watt}"
-        
+
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(ip, port),
                 timeout=10.0
             )
-            
+
             # Send command
             writer.write(command.encode())
             await writer.drain()
-            
+
             # Read response
             response = await asyncio.wait_for(reader.read(4096), timeout=10.0)
             writer.close()
             await writer.wait_closed()
-            
+
             response_str = response.decode('utf-8', errors='ignore')
             _LOGGER.debug(f"CGminer API response: {response_str}")
-            
+
             # Check for success - CGminer returns STATUS=S for success
             if "STATUS=S" in response_str or "STATUS=I" in response_str:
                 _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
@@ -278,7 +278,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
             else:
                 _LOGGER.error(f"CGminer API set power failed: {response_str}")
                 return False
-                
+
         except asyncio.TimeoutError:
             _LOGGER.error(f"CGminer API timeout connecting to {ip}:{port}")
             return False
