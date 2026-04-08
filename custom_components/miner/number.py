@@ -158,6 +158,45 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
         return False
 
+    def _bos_supports_rest_api(self) -> bool:
+        """Check if BOS firmware supports REST API (introduced in 23.03).
+        
+        Older firmware like 22.08.1 uses CGminer API instead.
+        REST API was introduced in BOS version 23.03.
+        
+        Firmware version formats:
+        - Old style: "22.08.1" (YY.MM.patch)
+        - New style: "2026-02-13-0-db69f9bc-26.01-plus" (date-hash-YY.MM-edition)
+        """
+        import re
+        
+        fw_ver = str(self.coordinator.data.get("fw_ver", "") or "")
+        
+        # Try to extract version number
+        # New format: "2026-02-13-0-db69f9bc-26.01-plus" -> extract "26.01"
+        new_format_match = re.search(r"-(\d{2})\.(\d{2})(?:-|$)", fw_ver)
+        if new_format_match:
+            year = int(new_format_match.group(1))
+            month = int(new_format_match.group(2))
+            # REST API introduced in 23.03
+            if year > 23 or (year == 23 and month >= 3):
+                return True
+            return False
+        
+        # Old format: "22.08.1" or "22.08" -> extract year and month
+        old_format_match = re.match(r"^(\d{2})\.(\d{2})", fw_ver)
+        if old_format_match:
+            year = int(old_format_match.group(1))
+            month = int(old_format_match.group(2))
+            # REST API introduced in 23.03
+            if year > 23 or (year == 23 and month >= 3):
+                return True
+            return False
+        
+        # Unknown format - assume modern firmware supports REST API
+        _LOGGER.debug(f"Unknown BOS firmware format: {fw_ver}, assuming REST API support")
+        return True
+
     async def async_set_native_value(self, value):
         """Update the current value."""
         import pyasic  # lazy import to avoid blocking event loop
@@ -178,22 +217,74 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         web_type = type(miner.web).__name__ if miner.web else "None"
         fw_ver = self.coordinator.data.get("fw_ver", "")
         is_bos = self._is_bos_miner()
+        supports_rest = self._bos_supports_rest_api() if is_bos else False
 
         _LOGGER.debug(
-            f"Miner class: {miner_class_name}, web: {web_type}, fw: {fw_ver}, is_bos: {is_bos}"
+            f"Miner class: {miner_class_name}, web: {web_type}, fw: {fw_ver}, "
+            f"is_bos: {is_bos}, supports_rest_api: {supports_rest}"
         )
 
-        if is_bos:
-            # BOS miners - use REST API to avoid restart
+        if is_bos and supports_rest:
+            # BOS 23.03+ - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))
+        elif is_bos and not supports_rest:
+            # BOS <23.03 - use CGminer API directly
+            result = await self._set_power_via_cgminer(int(value))
         else:
-            # Use pyasic's native set_power_limit for all other miners
+            # Use pyasic's native set_power_limit for non-BOS miners
             result = await miner.set_power_limit(int(value))
 
         if not result:
             raise pyasic.APIError("Failed to set wattage.")
 
         await self.coordinator.async_request_refresh()
+
+    async def _set_power_via_cgminer(self, watt: int) -> bool:
+        """Set power target using CGminer API (for older BOS firmware <23.03).
+        
+        Uses the ascset command: ascset|0,power,<watt>
+        CGminer API runs on port 4028.
+        """
+        import asyncio
+        
+        ip = self.coordinator.data["ip"]
+        port = 4028
+        
+        # CGminer command to set power limit
+        command = f"ascset|0,power,{watt}"
+        
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port),
+                timeout=10.0
+            )
+            
+            # Send command
+            writer.write(command.encode())
+            await writer.drain()
+            
+            # Read response
+            response = await asyncio.wait_for(reader.read(4096), timeout=10.0)
+            writer.close()
+            await writer.wait_closed()
+            
+            response_str = response.decode('utf-8', errors='ignore')
+            _LOGGER.debug(f"CGminer API response: {response_str}")
+            
+            # Check for success - CGminer returns STATUS=S for success
+            if "STATUS=S" in response_str or "STATUS=I" in response_str:
+                _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
+                return True
+            else:
+                _LOGGER.error(f"CGminer API set power failed: {response_str}")
+                return False
+                
+        except asyncio.TimeoutError:
+            _LOGGER.error(f"CGminer API timeout connecting to {ip}:{port}")
+            return False
+        except Exception as e:
+            _LOGGER.error(f"CGminer API error: {e}")
+            return False
 
     async def _set_power_via_bos_api(self, watt: int) -> bool:
         """Set power target using BOS REST API (doesn't restart miner)."""
