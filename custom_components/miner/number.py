@@ -360,39 +360,176 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
             return False
 
     async def _set_power_via_bos_api(self, watt: int) -> bool:
-        """Set power target using BOS REST API (doesn't restart miner)."""
+        """Set power target using BOS gRPC API (port 50051).
+
+        BOS 23.03+ uses gRPC API for all operations.
+        See: https://github.com/braiins/bos-plus-api
+
+        This implementation uses grpclib directly with manual protobuf encoding
+        to avoid requiring generated stubs.
+        """
         ip = self.coordinator.data["ip"]
         username = self.coordinator.config_entry.data.get(CONF_WEB_USERNAME, "root")
         password = self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "root")
 
         try:
-            async with aiohttp.ClientSession() as session:
-                # Login to get auth token
-                async with session.post(
-                    f"http://{ip}/api/v1/auth/login",
-                    json={"username": username, "password": password},
-                ) as resp:
-                    if resp.status != 200:
-                        _LOGGER.error(f"BOS API login failed: {resp.status}")
-                        return False
-                    login_data = await resp.json()
-                    token = login_data.get("token")
+            from grpclib.client import Channel
+            from grpclib.const import Cardinality
 
-                # Set power target (token only, no Bearer prefix for BOS API)
-                async with session.put(
-                    f"http://{ip}/api/v1/performance/power-target",
-                    json={"watt": watt},
-                    headers={"Authorization": token},
-                ) as resp:
-                    if resp.status != 200:
-                        _LOGGER.error(f"BOS API set power failed: {resp.status}")
-                        return False
-                    _LOGGER.debug(f"BOS API set power to {watt}W successfully")
-                    return True
+            async with Channel(ip, 50051) as channel:
+                # Step 1: Login to get auth token
+                # LoginRequest: {username: string (field 1), password: string (field 2)}
+                login_data = self._encode_login_request(username, password)
 
+                login_stream = await channel.request(
+                    "/braiins.bos.v1.AuthenticationService/Login",
+                    request_type=None,
+                    reply_type=None,
+                    cardinality=Cardinality.UNARY_UNARY,
+                    timeout=10,
+                )
+                await login_stream.send_message(login_data, end=True)
+                login_reply = await login_stream.recv_message()
+                await login_stream.recv_trailing_metadata()
+
+                token = self._parse_login_response(login_reply)
+                if not token:
+                    _LOGGER.error("BOS gRPC: Failed to get auth token")
+                    return False
+
+                _LOGGER.debug("BOS gRPC: Got auth token")
+
+                # Step 2: Set power target with auth token
+                # SetPowerTargetRequest: {save_action: enum (field 1), power_target: Power (field 2)}
+                # Power: {watt: uint64 (field 1)}
+                # SaveAction: SAVE_ACTION_SAVE_AND_APPLY = 2
+                power_data = self._encode_set_power_request(watt)
+
+                power_stream = await channel.request(
+                    "/braiins.bos.v1.PerformanceService/SetPowerTarget",
+                    request_type=None,
+                    reply_type=None,
+                    cardinality=Cardinality.UNARY_UNARY,
+                    timeout=10,
+                    metadata={"authorization": token},
+                )
+                await power_stream.send_message(power_data, end=True)
+                await power_stream.recv_message()
+                await power_stream.recv_trailing_metadata()
+
+                _LOGGER.debug(f"BOS gRPC: Set power to {watt}W successfully")
+                return True
+
+        except ImportError:
+            _LOGGER.warning("grpclib not available, falling back to GraphQL")
+            return await self._set_power_via_graphql(watt)
         except Exception as e:
-            _LOGGER.error(f"BOS API error: {e}")
-            return False
+            _LOGGER.error(f"BOS gRPC error: {e}")
+            # Fall back to GraphQL for older firmware or connection issues
+            _LOGGER.info("Falling back to GraphQL API")
+            return await self._set_power_via_graphql(watt)
+
+    def _encode_varint(self, value: int) -> bytes:
+        """Encode an integer as a protobuf varint."""
+        result = []
+        while value > 127:
+            result.append((value & 0x7F) | 0x80)
+            value >>= 7
+        result.append(value)
+        return bytes(result)
+
+    def _encode_string(self, field_num: int, value: str) -> bytes:
+        """Encode a string field in protobuf format."""
+        encoded = value.encode("utf-8")
+        # Wire type 2 (length-delimited) for strings
+        tag = (field_num << 3) | 2
+        return self._encode_varint(tag) + self._encode_varint(len(encoded)) + encoded
+
+    def _encode_uint64(self, field_num: int, value: int) -> bytes:
+        """Encode a uint64 field in protobuf format."""
+        # Wire type 0 (varint)
+        tag = (field_num << 3) | 0
+        return self._encode_varint(tag) + self._encode_varint(value)
+
+    def _encode_message(self, field_num: int, data: bytes) -> bytes:
+        """Encode an embedded message in protobuf format."""
+        # Wire type 2 (length-delimited)
+        tag = (field_num << 3) | 2
+        return self._encode_varint(tag) + self._encode_varint(len(data)) + data
+
+    def _encode_login_request(self, username: str, password: str) -> bytes:
+        """Encode LoginRequest protobuf message.
+
+        message LoginRequest {
+            string username = 1;
+            string password = 2;
+        }
+        """
+        return self._encode_string(1, username) + self._encode_string(2, password)
+
+    def _parse_login_response(self, data: bytes) -> str | None:
+        """Parse LoginResponse protobuf message to extract token.
+
+        message LoginResponse {
+            string token = 1;
+            uint32 timeout_s = 2;
+        }
+        """
+        if not data:
+            return None
+
+        pos = 0
+        while pos < len(data):
+            # Read field tag
+            tag_byte = data[pos]
+            field_num = tag_byte >> 3
+            wire_type = tag_byte & 0x07
+            pos += 1
+
+            if wire_type == 2:  # Length-delimited (string)
+                # Read length varint
+                length = 0
+                shift = 0
+                while True:
+                    b = data[pos]
+                    pos += 1
+                    length |= (b & 0x7F) << shift
+                    if not (b & 0x80):
+                        break
+                    shift += 7
+
+                if field_num == 1:  # token field
+                    return data[pos:pos + length].decode("utf-8")
+                pos += length
+            elif wire_type == 0:  # Varint
+                while data[pos] & 0x80:
+                    pos += 1
+                pos += 1
+            else:
+                break
+
+        return None
+
+    def _encode_set_power_request(self, watt: int) -> bytes:
+        """Encode SetPowerTargetRequest protobuf message.
+
+        message SetPowerTargetRequest {
+            SaveAction save_action = 1;  // enum, SAVE_ACTION_SAVE_AND_APPLY = 2
+            Power power_target = 2;      // embedded message
+        }
+
+        message Power {
+            uint64 watt = 1;
+        }
+        """
+        # SaveAction field: SAVE_ACTION_SAVE_AND_APPLY = 2
+        save_action = self._encode_uint64(1, 2)
+
+        # Power message: {watt: uint64}
+        power_msg = self._encode_uint64(1, watt)
+        power_target = self._encode_message(2, power_msg)
+
+        return save_action + power_target
 
     @callback
     def _handle_coordinator_update(self) -> None:
