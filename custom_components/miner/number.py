@@ -365,7 +365,7 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
         BOS 23.03+ uses gRPC API for all operations.
         See: https://github.com/braiins/bos-plus-api
 
-        This implementation uses grpclib directly with manual protobuf encoding
+        This implementation uses grpcio.aio with manual protobuf encoding
         to avoid requiring generated stubs.
         """
         ip = self.coordinator.data["ip"]
@@ -373,26 +373,21 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
         password = self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "root")
 
         try:
-            from grpclib.client import Channel
-            from grpclib.const import Cardinality
+            import grpc.aio
 
-            async with Channel(ip, 50051) as channel:
+            channel = grpc.aio.insecure_channel(f"{ip}:50051")
+
+            try:
                 # Step 1: Login to get auth token
-                # LoginRequest: {username: string (field 1), password: string (field 2)}
                 login_data = self._encode_login_request(username, password)
 
-                login_stream = await channel.request(
+                login_response = await channel.unary_unary(
                     "/braiins.bos.v1.AuthenticationService/Login",
-                    request_type=None,
-                    reply_type=None,
-                    cardinality=Cardinality.UNARY_UNARY,
-                    timeout=10,
-                )
-                await login_stream.send_message(login_data, end=True)
-                login_reply = await login_stream.recv_message()
-                await login_stream.recv_trailing_metadata()
+                    request_serializer=lambda x: x,
+                    response_deserializer=lambda x: x,
+                )(login_data)
 
-                token = self._parse_login_response(login_reply)
+                token = self._parse_login_response(login_response)
                 if not token:
                     _LOGGER.error("BOS gRPC: Failed to get auth token")
                     return False
@@ -400,28 +395,23 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
                 _LOGGER.debug("BOS gRPC: Got auth token")
 
                 # Step 2: Set power target with auth token
-                # SetPowerTargetRequest: {save_action: enum (field 1), power_target: Power (field 2)}
-                # Power: {watt: uint64 (field 1)}
-                # SaveAction: SAVE_ACTION_SAVE_AND_APPLY = 2
                 power_data = self._encode_set_power_request(watt)
+                metadata = [("authorization", token)]
 
-                power_stream = await channel.request(
+                await channel.unary_unary(
                     "/braiins.bos.v1.PerformanceService/SetPowerTarget",
-                    request_type=None,
-                    reply_type=None,
-                    cardinality=Cardinality.UNARY_UNARY,
-                    timeout=10,
-                    metadata={"authorization": token},
-                )
-                await power_stream.send_message(power_data, end=True)
-                await power_stream.recv_message()
-                await power_stream.recv_trailing_metadata()
+                    request_serializer=lambda x: x,
+                    response_deserializer=lambda x: x,
+                )(power_data, metadata=metadata)
 
                 _LOGGER.debug(f"BOS gRPC: Set power to {watt}W successfully")
                 return True
 
+            finally:
+                await channel.close()
+
         except ImportError:
-            _LOGGER.warning("grpclib not available, falling back to GraphQL")
+            _LOGGER.warning("grpcio not available, falling back to GraphQL")
             return await self._set_power_via_graphql(watt)
         except Exception as e:
             _LOGGER.error(f"BOS gRPC error: {e}")

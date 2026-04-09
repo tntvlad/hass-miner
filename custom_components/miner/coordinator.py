@@ -60,6 +60,8 @@ DEFAULT_DATA = {
     "vnish_preset": None,
     "vnish_best_share": None,
     "vnish_found_blocks": None,
+    "bos_best_share": None,
+    "bos_found_blocks": None,
 }
 
 
@@ -304,6 +306,276 @@ def _is_vnish_miner(miner) -> bool:
     return False
 
 
+def _is_bos_miner(miner, fw_ver: str = "") -> bool:
+    """Check if miner is running BrainOS (Braiins OS) firmware."""
+    if miner is None:
+        return False
+
+    # Check miner class name
+    miner_class_name = miner.__class__.__name__
+    if "BOSer" in miner_class_name or "BOS" in miner_class_name:
+        return True
+
+    # Check web API type (BOSMinerWebAPI or similar)
+    if miner.web is not None:
+        web_type = type(miner.web).__name__
+        if "BOS" in web_type or "Braiins" in web_type:
+            return True
+
+    # Check firmware version string for BrainOS patterns
+    fw_ver_lower = str(fw_ver or "").lower()
+    if any(pattern in fw_ver_lower for pattern in ["braiins", "bos+", "bos-", "-plus"]):
+        return True
+
+    # Check if firmware looks like a BrainOS date-based version
+    # Pattern: YYYY-MM-DD followed by hash and version
+    if re.match(r"\d{4}-\d{2}-\d{2}-\d+-[a-f0-9]+-\d+\.\d+", fw_ver_lower):
+        return True
+
+    return False
+
+
+async def _fetch_bos_miner_stats(
+    ip: str, username: str = "root", password: str = "root"
+) -> dict | None:
+    """Fetch miner stats (best_share, found_blocks) from BOS miner via gRPC API.
+
+    Uses braiins.bos.v1.MinerService/GetMinerStats on port 50051.
+    """
+    try:
+        import grpc.aio
+
+        # Create async channel
+        channel = grpc.aio.insecure_channel(f"{ip}:50051")
+
+        try:
+            # Step 1: Login to get auth token
+            login_data = _encode_login_request(username, password)
+
+            login_response = await channel.unary_unary(
+                "/braiins.bos.v1.AuthenticationService/Login",
+                request_serializer=lambda x: x,
+                response_deserializer=lambda x: x,
+            )(login_data)
+
+            token = _parse_login_response(login_response)
+            if not token:
+                _LOGGER.debug("BOS gRPC: Failed to get auth token for stats")
+                return None
+
+            # Step 2: Get miner stats with auth token
+            metadata = [("authorization", token)]
+            stats_response = await channel.unary_unary(
+                "/braiins.bos.v1.MinerService/GetMinerStats",
+                request_serializer=lambda x: x,
+                response_deserializer=lambda x: x,
+            )(b"", metadata=metadata)
+
+            _LOGGER.debug(
+                f"BOS gRPC stats raw response: {stats_response.hex() if stats_response else 'None'}"
+            )
+            result = _parse_miner_stats_response(stats_response)
+            _LOGGER.debug(f"BOS gRPC stats parsed result: {result}")
+            return result
+
+        finally:
+            await channel.close()
+
+    except ImportError:
+        _LOGGER.debug("grpcio not available for BOS stats")
+        return None
+    except Exception as e:
+        _LOGGER.debug(f"BOS gRPC stats error: {e}")
+        return None
+
+
+def _encode_varint(value: int) -> bytes:
+    """Encode an integer as a protobuf varint."""
+    result = []
+    while value > 127:
+        result.append((value & 0x7F) | 0x80)
+        value >>= 7
+    result.append(value)
+    return bytes(result)
+
+
+def _encode_string(field_num: int, value: str) -> bytes:
+    """Encode a string field in protobuf format."""
+    encoded = value.encode("utf-8")
+    tag = (field_num << 3) | 2
+    return _encode_varint(tag) + _encode_varint(len(encoded)) + encoded
+
+
+def _encode_login_request(username: str, password: str) -> bytes:
+    """Encode LoginRequest protobuf message."""
+    return _encode_string(1, username) + _encode_string(2, password)
+
+
+def _parse_login_response(data: bytes) -> str | None:
+    """Parse LoginResponse protobuf message to extract token."""
+    if not data:
+        return None
+
+    pos = 0
+    while pos < len(data):
+        tag_byte = data[pos]
+        field_num = tag_byte >> 3
+        wire_type = tag_byte & 0x07
+        pos += 1
+
+        if wire_type == 2:  # Length-delimited (string)
+            length = 0
+            shift = 0
+            while True:
+                b = data[pos]
+                pos += 1
+                length |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    break
+                shift += 7
+
+            if field_num == 1:  # token field
+                return data[pos : pos + length].decode("utf-8")
+            pos += length
+        elif wire_type == 0:  # Varint
+            while data[pos] & 0x80:
+                pos += 1
+            pos += 1
+        else:
+            break
+
+    return None
+
+
+def _parse_varint(data: bytes, pos: int) -> tuple[int, int]:
+    """Parse a varint from data at position, return (value, new_pos)."""
+    value = 0
+    shift = 0
+    while pos < len(data):
+        b = data[pos]
+        pos += 1
+        value |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return value, pos
+
+
+def _parse_miner_stats_response(data: bytes) -> dict | None:
+    """Parse GetMinerStatsResponse protobuf message.
+
+    message GetMinerStatsResponse {
+        PoolStats pool_stats = 1;
+        WorkSolverStats miner_stats = 2;
+        MinerPowerStats power_stats = 3;
+    }
+
+    Based on bos-plus-api proto, WorkSolverStats contains:
+    - found_blocks = 4 (uint32)
+    - best_share = 5 (uint64)
+    """
+    if not data:
+        _LOGGER.debug("BOS gRPC: GetMinerStatsResponse is empty")
+        return None
+
+    result = {}
+    _LOGGER.debug(f"BOS gRPC: parsing GetMinerStatsResponse, len={len(data)}")
+
+    try:
+        pos = 0
+        while pos < len(data):
+            if pos >= len(data):
+                break
+
+            tag_byte = data[pos]
+            field_num = tag_byte >> 3
+            wire_type = tag_byte & 0x07
+            pos += 1
+
+            _LOGGER.debug(f"BOS gRPC outer: field={field_num}, wire_type={wire_type}, pos={pos}")
+
+            if wire_type == 2:  # Length-delimited (embedded message)
+                length, pos = _parse_varint(data, pos)
+                _LOGGER.debug(f"BOS gRPC outer: embedded message field {field_num}, len={length}")
+                if field_num == 2:  # miner_stats field (WorkSolverStats)
+                    # Parse the embedded WorkSolverStats message
+                    inner_data = data[pos : pos + length]
+                    inner_result = _parse_miner_stats_inner(inner_data)
+                    if inner_result:
+                        result.update(inner_result)
+                pos += length
+            elif wire_type == 0:  # Varint
+                _, pos = _parse_varint(data, pos)
+            elif wire_type == 1:  # 64-bit
+                pos += 8
+            elif wire_type == 5:  # 32-bit
+                pos += 4
+            else:
+                _LOGGER.debug(f"BOS gRPC outer: unknown wire_type {wire_type}")
+                break
+
+    except Exception as e:
+        _LOGGER.debug(f"Error parsing BOS miner stats: {e}")
+
+    return result if result else None
+
+
+def _parse_miner_stats_inner(data: bytes) -> dict | None:
+    """Parse inner MinerStats message to extract best_share and found_blocks.
+
+    Looking for fields by scanning all varint fields.
+    best_share is uint64, found_blocks is uint32.
+    """
+    if not data:
+        _LOGGER.debug("BOS gRPC: inner data is empty")
+        return None
+
+    # Default values - protobuf doesn't send fields with value 0
+    result = {"best_share": 0, "found_blocks": 0}
+    pos = 0
+    _LOGGER.debug(f"BOS gRPC: parsing inner WorkSolverStats, len={len(data)}")
+
+    try:
+        while pos < len(data):
+            if pos >= len(data):
+                break
+
+            tag_byte = data[pos]
+            field_num = tag_byte >> 3
+            wire_type = tag_byte & 0x07
+            pos += 1
+
+            _LOGGER.debug(f"BOS gRPC inner: field={field_num}, wire_type={wire_type}, pos={pos}")
+
+            if wire_type == 0:  # Varint (uint32, uint64, int32, etc.)
+                value, pos = _parse_varint(data, pos)
+                _LOGGER.debug(f"BOS gRPC inner: varint field {field_num} = {value}")
+                # Based on work.proto WorkSolverStats:
+                # found_blocks is field 4 (uint32)
+                # best_share is field 5 (uint64)
+                if field_num == 4:
+                    result["found_blocks"] = value
+                elif field_num == 5:
+                    result["best_share"] = value
+            elif wire_type == 2:  # Length-delimited
+                length, pos = _parse_varint(data, pos)
+                _LOGGER.debug(f"BOS gRPC inner: skipping embedded message field {field_num}, len={length}")
+                pos += length
+            elif wire_type == 1:  # 64-bit
+                pos += 8
+            elif wire_type == 5:  # 32-bit
+                pos += 4
+            else:
+                _LOGGER.debug(f"BOS gRPC inner: unknown wire_type {wire_type}")
+                break
+
+    except Exception as e:
+        _LOGGER.debug(f"Error parsing MinerStats inner: {e}")
+
+    _LOGGER.debug(f"BOS gRPC inner: result = {result}")
+    return result  # Always return dict with defaults
+
+
 class MinerCoordinator(DataUpdateCoordinator):
     """Class to manage fetching update data from the Miner."""
 
@@ -536,6 +808,8 @@ class MinerCoordinator(DataUpdateCoordinator):
             "vnish_preset": None,
             "vnish_best_share": None,
             "vnish_found_blocks": None,
+            "bos_best_share": None,
+            "bos_found_blocks": None,
         }
 
         # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
@@ -597,5 +871,16 @@ class MinerCoordinator(DataUpdateCoordinator):
             if vnish_summary:
                 data["vnish_best_share"] = vnish_summary.get("best_share")
                 data["vnish_found_blocks"] = vnish_summary.get("found_blocks")
+
+        # Fetch BOS miner stats (Best Share, Found Blocks) via gRPC
+        if _is_bos_miner(self.miner, miner_data.fw_ver):
+            bos_stats = await _fetch_bos_miner_stats(
+                self.miner.ip,
+                self.config_entry.data.get(CONF_WEB_USERNAME, "root"),
+                self.config_entry.data.get(CONF_WEB_PASSWORD, "root"),
+            )
+            if bos_stats:
+                data["bos_best_share"] = bos_stats.get("best_share")
+                data["bos_found_blocks"] = bos_stats.get("found_blocks")
 
         return data
