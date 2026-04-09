@@ -228,8 +228,8 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
             # BOS 23.03+ - use REST API to avoid restart
             result = await self._set_power_via_bos_api(int(value))
         elif is_bos and not supports_rest:
-            # BOS <23.03 - use CGminer API directly
-            result = await self._set_power_via_cgminer(int(value))
+            # BOS <23.03 - use GraphQL API
+            result = await self._set_power_via_graphql(int(value))
         else:
             # Use pyasic's native set_power_limit for non-BOS miners
             result = await miner.set_power_limit(int(value))
@@ -239,56 +239,111 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
         await self.coordinator.async_request_refresh()
 
-    async def _set_power_via_cgminer(self, watt: int) -> bool:
-        """Set power target using CGminer API (for older BOS firmware <23.03).
+    async def _set_power_via_graphql(self, watt: int) -> bool:
+        """Set power target using GraphQL API (for older BOS firmware <23.03).
 
-        Uses JSON format: {"command":"ascset","parameter":"0,PowerLimit,<watt>"}
-        CGminer API runs on port 4028.
+        Older BOS firmware uses GraphQL at /graphql endpoint.
         """
-        import asyncio
-        import json
-
         ip = self.coordinator.data["ip"]
-        port = 4028
+        username = self.coordinator.config_entry.data.get(CONF_WEB_USERNAME, "root")
+        password = self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "root")
 
-        # CGminer command to set power limit (JSON format)
-        command = json.dumps({"command": "ascset", "parameter": f"0,PowerLimit,{watt}"})
+        # GraphQL login mutation
+        login_query = """
+mutation ($username: String!, $password: String!) {
+  auth {
+    login(username: $username, password: $password) {
+      ... on Error {
+        message
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+"""
+
+        # GraphQL power update mutation
+        power_query = """
+mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
+  bosminer {
+    config {
+      updateAutotuning(input: $tuneInput, apply: $apply) {
+        ... on AttributeError {
+          message
+          __typename
+        }
+        ... on AutotuningError {
+          mode
+          message
+          __typename
+        }
+        ... on AutotuningOut {
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+"""
 
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port),
-                timeout=10.0
-            )
+            async with aiohttp.ClientSession() as session:
+                # Login first
+                async with session.post(
+                    f"http://{ip}/graphql",
+                    json={
+                        "query": login_query,
+                        "variables": {"username": username, "password": password}
+                    },
+                    headers={"Content-Type": "application/json"}
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error(f"BOS GraphQL login failed: {resp.status}")
+                        return False
+                    login_data = await resp.json()
+                    _LOGGER.debug(f"BOS GraphQL login response: {login_data}")
 
-            # Send command
-            writer.write(command.encode())
-            await writer.drain()
+                # Set power target
+                async with session.post(
+                    f"http://{ip}/graphql",
+                    json={
+                        "query": power_query,
+                        "variables": {
+                            "tuneInput": {"powerTarget": watt},
+                            "apply": True
+                        }
+                    },
+                    headers={"Content-Type": "application/json"}
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error(f"BOS GraphQL set power failed: {resp.status}")
+                        return False
+                    result = await resp.json()
+                    _LOGGER.debug(f"BOS GraphQL set power response: {result}")
 
-            # Read response
-            response = await asyncio.wait_for(reader.read(4096), timeout=10.0)
-            writer.close()
-            await writer.wait_closed()
+                    # Check for success
+                    if "errors" in result:
+                        _LOGGER.error(f"BOS GraphQL error: {result['errors']}")
+                        return False
 
-            response_str = response.decode('utf-8', errors='ignore')
-            _LOGGER.debug(f"CGminer API response: {response_str}")
+                    config = result.get("data", {}).get("bosminer", {}).get("config", {})
+                    update_result = config.get("updateAutotuning", {})
+                    if update_result.get("__typename") == "AutotuningOut":
+                        _LOGGER.debug(f"BOS GraphQL set power to {watt}W successfully")
+                        return True
+                    elif "message" in update_result:
+                        _LOGGER.error(f"BOS GraphQL error: {update_result['message']}")
+                        return False
 
-            # Check for success - CGminer returns STATUS with S or I for success
-            if '"STATUS":"S"' in response_str or '"STATUS":"I"' in response_str:
-                _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
-                return True
-            # Also check plain text format response
-            elif "STATUS=S" in response_str or "STATUS=I" in response_str:
-                _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
-                return True
-            else:
-                _LOGGER.error(f"CGminer API set power failed: {response_str}")
-                return False
+                    return True
 
-        except asyncio.TimeoutError:
-            _LOGGER.error(f"CGminer API timeout connecting to {ip}:{port}")
-            return False
         except Exception as e:
-            _LOGGER.error(f"CGminer API error: {e}")
+            _LOGGER.error(f"BOS GraphQL error: {e}")
             return False
 
     async def _set_power_via_bos_api(self, watt: int) -> bool:
