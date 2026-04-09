@@ -242,16 +242,17 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
     async def _set_power_via_cgminer(self, watt: int) -> bool:
         """Set power target using CGminer API (for older BOS firmware <23.03).
 
-        Uses the ascset command: ascset|0,power,<watt>
+        Uses JSON format: {"command":"ascset","parameter":"0,PowerLimit,<watt>"}
         CGminer API runs on port 4028.
         """
         import asyncio
+        import json
 
         ip = self.coordinator.data["ip"]
         port = 4028
 
-        # CGminer command to set power limit
-        command = f"ascset|0,power,{watt}"
+        # CGminer command to set power limit (JSON format)
+        command = json.dumps({"command": "ascset", "parameter": f"0,PowerLimit,{watt}"})
 
         try:
             reader, writer = await asyncio.wait_for(
@@ -271,8 +272,12 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
             response_str = response.decode('utf-8', errors='ignore')
             _LOGGER.debug(f"CGminer API response: {response_str}")
 
-            # Check for success - CGminer returns STATUS=S for success
-            if "STATUS=S" in response_str or "STATUS=I" in response_str:
+            # Check for success - CGminer returns STATUS with S or I for success
+            if '"STATUS":"S"' in response_str or '"STATUS":"I"' in response_str:
+                _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
+                return True
+            # Also check plain text format response
+            elif "STATUS=S" in response_str or "STATUS=I" in response_str:
                 _LOGGER.debug(f"CGminer API set power to {watt}W successfully")
                 return True
             else:
