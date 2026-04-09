@@ -248,6 +248,10 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         username = self.coordinator.config_entry.data.get(CONF_WEB_USERNAME, "root")
         password = self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "root")
 
+        _LOGGER.debug(
+            f"BOS GraphQL: ip={ip}, username={username}, password={'*' * len(password) if password else 'None'}"
+        )
+
         # GraphQL login mutation
         login_query = """
 mutation ($username: String!, $password: String!) {
@@ -292,7 +296,9 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
 """
 
         try:
-            async with aiohttp.ClientSession() as session:
+            # Use cookie jar to preserve session cookies
+            jar = aiohttp.CookieJar(unsafe=True)  # unsafe=True allows cookies for IP addresses
+            async with aiohttp.ClientSession(cookie_jar=jar) as session:
                 # Login first
                 async with session.post(
                     f"http://{ip}/graphql",
@@ -307,6 +313,13 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
                         return False
                     login_data = await resp.json()
                     _LOGGER.debug(f"BOS GraphQL login response: {login_data}")
+                    _LOGGER.debug(f"BOS GraphQL cookies after login: {session.cookie_jar.filter_cookies(f'http://{ip}')}")
+
+                    # Check for login errors
+                    auth_result = login_data.get("data", {}).get("auth", {}).get("login", {})
+                    if auth_result.get("__typename") == "Error":
+                        _LOGGER.error(f"BOS GraphQL login error: {auth_result.get('message')}")
+                        return False
 
                 # Set power target
                 async with session.post(
