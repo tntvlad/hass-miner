@@ -297,12 +297,119 @@ async def _fetch_vnish_summary(ip: str, password: str = "admin") -> dict | None:
     return None
 
 
-def _is_vnish_miner(miner) -> bool:
+async def _fetch_vnish_temperatures(ip: str, password: str = "admin") -> dict | None:
+    """Fetch temperature data from VNish miner via REST API (bypassing pyasic).
+
+    Returns a dict with board temperatures (min and max):
+    {
+        0: {
+            "board_temperature": 62, "board_temperature_min": 53,
+            "chip_temperature": 77, "chip_temperature_min": 68
+        },
+        ...
+    }
+
+    Note: VNish API structure - temps are nested objects:
+    - pcb_temp: {"min": 53, "max": 62}  (board/PCB temperature)
+    - chip_temp: {"min": 68, "max": 77} (chip temperature, always higher)
+
+    We extract both min and max values for display.
+    """
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Unlock and get auth token
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("VNish %s: unlock failed with status %s", ip, resp.status)
+                    return None
+                token = (await resp.json()).get("token")
+                if not token:
+                    _LOGGER.debug("VNish %s: no token in unlock response", ip)
+                    return None
+
+            # Get summary data which includes hashboard temperatures
+            async with session.get(
+                f"{base_url}/summary",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("VNish %s: summary failed with status %s", ip, resp.status)
+                    return None
+                summary = await resp.json()
+
+                _LOGGER.debug("VNish %s: raw summary keys: %s", ip, list(summary.keys()))
+
+                result = {}
+                # VNish API returns hashboards in miner.chains array
+                if "miner" in summary and "chains" in summary["miner"]:
+                    chains = summary["miner"]["chains"]
+                    _LOGGER.debug("VNish %s: found %d chains in miner.chains", ip, len(chains))
+                    for chain in chains:
+                        # VNish uses 1-based chain IDs, convert to 0-based slot index
+                        chain_id = chain.get("id", 0)
+                        slot = chain_id - 1 if chain_id > 0 else 0
+
+                        # VNish API: temps are nested objects with min/max
+                        # pcb_temp: {"min": 53, "max": 62}
+                        # chip_temp: {"min": 68, "max": 77}
+                        pcb_temp_obj = chain.get("pcb_temp", {})
+                        chip_temp_obj = chain.get("chip_temp", {})
+
+                        # Extract min and max temps (or 0 if not present)
+                        pcb_temp_max = pcb_temp_obj.get("max", 0) if isinstance(pcb_temp_obj, dict) else 0
+                        pcb_temp_min = pcb_temp_obj.get("min", 0) if isinstance(pcb_temp_obj, dict) else 0
+                        chip_temp_max = chip_temp_obj.get("max", 0) if isinstance(chip_temp_obj, dict) else 0
+                        chip_temp_min = chip_temp_obj.get("min", 0) if isinstance(chip_temp_obj, dict) else 0
+
+                        _LOGGER.debug(
+                            "VNish %s chain id=%d slot=%d: pcb=%s/%s, chip=%s/%s",
+                            ip, chain_id, slot, pcb_temp_min, pcb_temp_max, chip_temp_min, chip_temp_max
+                        )
+
+                        result[slot] = {
+                            "board_temperature": pcb_temp_max,
+                            "board_temperature_min": pcb_temp_min,
+                            "chip_temperature": chip_temp_max,
+                            "chip_temperature_min": chip_temp_min,
+                        }
+                    _LOGGER.debug("VNish %s: final temps result: %s", ip, result)
+                    return result if result else None
+
+                _LOGGER.debug("VNish %s: no chains found in miner.chains", ip)
+
+    except Exception as e:
+        _LOGGER.debug("VNish %s: failed to fetch temperatures: %s", ip, e)
+    return None
+
+
+def _is_vnish_miner(miner, fw_ver: str = "") -> bool:
     """Check if miner is running VNish firmware."""
     if miner is None:
         return False
+
+    # Check web API type
     if miner.web is not None:
-        return type(miner.web).__name__ == "VNishWebAPI"
+        if type(miner.web).__name__ == "VNishWebAPI":
+            return True
+
+    # Check firmware version string for VNish patterns
+    fw_ver_lower = str(fw_ver or "").lower()
+    if "vnish" in fw_ver_lower:
+        return True
+
+    # Check miner class name
+    miner_class_name = miner.__class__.__name__.lower()
+    if "vnish" in miner_class_name:
+        return True
+
     return False
 
 
@@ -787,7 +894,9 @@ class MinerCoordinator(DataUpdateCoordinator):
             "board_sensors": {
                 board.slot: {
                     "board_temperature": board.temp,
+                    "board_temperature_min": None,  # VNish only
                     "chip_temperature": board.chip_temp,
+                    "chip_temperature_min": None,  # VNish only
                     "board_hashrate": round(float(board.hashrate or 0), 2),
                 }
                 for board in miner_data.hashboards
@@ -842,35 +951,61 @@ class MinerCoordinator(DataUpdateCoordinator):
             if asc_enabled is not None:
                 data["avalon_asc_enabled"] = asc_enabled
 
-        # Fetch VNish preset for VNish firmware miners
-        if (
-            self.miner.web is not None
-            and type(self.miner.web).__name__ == "VNishWebAPI"
-        ):
-            vnish_preset = await _fetch_vnish_preset(
-                self.miner.ip,
-                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
-            )
-            if vnish_preset:
-                data["vnish_preset"] = vnish_preset
+        # Fetch VNish data for VNish firmware miners
+        if _is_vnish_miner(self.miner, miner_data.fw_ver):
+            web_password = self.config_entry.data.get(CONF_WEB_PASSWORD, "admin")
 
-        # Fetch VNish preset and summary for VNish firmware miners
-        if _is_vnish_miner(self.miner):
-            vnish_preset = await _fetch_vnish_preset(
-                self.miner.ip,
-                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
-            )
+            # Fetch VNish preset
+            vnish_preset = await _fetch_vnish_preset(self.miner.ip, web_password)
             if vnish_preset:
                 data["vnish_preset"] = vnish_preset
 
             # Fetch VNish summary data (Best Share, Found Blocks)
-            vnish_summary = await _fetch_vnish_summary(
-                self.miner.ip,
-                self.config_entry.data.get(CONF_WEB_PASSWORD, "admin"),
-            )
+            vnish_summary = await _fetch_vnish_summary(self.miner.ip, web_password)
             if vnish_summary:
                 data["vnish_best_share"] = vnish_summary.get("best_share")
                 data["vnish_found_blocks"] = vnish_summary.get("found_blocks")
+
+            # Always fetch VNish temperatures directly (bypass pyasic completely)
+            vnish_temps = await _fetch_vnish_temperatures(
+                self.miner.ip, web_password
+            )
+            if vnish_temps:
+                _LOGGER.debug(
+                    "VNish %s: replacing pyasic temps with VNish API data",
+                    self.miner.ip,
+                )
+                # Completely overwrite board_sensors temperatures with VNish API data
+                for slot, temps in vnish_temps.items():
+                    board_temp = temps.get("board_temperature", 0)
+                    board_temp_min = temps.get("board_temperature_min", 0)
+                    chip_temp = temps.get("chip_temperature", 0)
+                    chip_temp_min = temps.get("chip_temperature_min", 0)
+                    if slot in data["board_sensors"]:
+                        # Preserve hashrate from pyasic, replace temps from VNish API
+                        data["board_sensors"][slot]["board_temperature"] = board_temp
+                        data["board_sensors"][slot]["board_temperature_min"] = board_temp_min
+                        data["board_sensors"][slot]["chip_temperature"] = chip_temp
+                        data["board_sensors"][slot]["chip_temperature_min"] = chip_temp_min
+                    else:
+                        # Create new board entry with VNish temps
+                        data["board_sensors"][slot] = {
+                            "board_temperature": board_temp,
+                            "board_temperature_min": board_temp_min,
+                            "chip_temperature": chip_temp,
+                            "chip_temperature_min": chip_temp_min,
+                            "board_hashrate": 0,
+                        }
+                _LOGGER.debug(
+                    "VNish %s: final board_sensors: %s",
+                    self.miner.ip,
+                    data["board_sensors"],
+                )
+            else:
+                _LOGGER.warning(
+                    "VNish %s: temperature fetch failed, using pyasic fallback",
+                    self.miner.ip,
+                )
 
         # Fetch BOS miner stats (Best Share, Found Blocks) via gRPC
         if _is_bos_miner(self.miner, miner_data.fw_ver):

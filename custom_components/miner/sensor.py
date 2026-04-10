@@ -47,6 +47,15 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         device_class=SensorDeviceClass.TEMPERATURE,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    "board_temperature_min": SensorEntityDescription(
+        key="Board Temperature Min",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
     "chip_temperature": SensorEntityDescription(
         key="Chip Temperature",
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -54,6 +63,15 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "chip_temperature_min": SensorEntityDescription(
+        key="Chip Temperature Min",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     "hashrate": SensorEntityDescription(
         key="Hashrate",
@@ -172,7 +190,7 @@ async def async_setup_entry(
             continue
         sensors.append(_create_miner_entity(s))
     for board in range(coordinator.miner.expected_hashboards or 3):
-        for s in ["board_temperature", "chip_temperature", "board_hashrate"]:
+        for s in ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]:
             sensors.append(_create_board_entity(board, s))
     for fan in range(coordinator.miner.expected_fans or 4):
         for s in ["fan_speed"]:
