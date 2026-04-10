@@ -184,13 +184,20 @@ async def async_setup_entry(
 
     sensors = []
     is_avalon = _is_avalon_nano_miner(coordinator.miner)
+    is_vnish = _is_vnish_miner(coordinator.miner, coordinator.data.get("fw_ver", ""))
     for s in coordinator.data["miner_sensors"]:
         # Only show active_preset_name for Avalon Nano miners (workmode)
         if s == "active_preset_name" and not is_avalon:
             continue
         sensors.append(_create_miner_entity(s))
+
+    # Build board sensor list - min temps only for VNish
+    board_sensors = ["board_temperature", "chip_temperature", "board_hashrate"]
+    if is_vnish:
+        board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]
+
     for board in range(coordinator.miner.expected_hashboards or 3):
-        for s in ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]:
+        for s in board_sensors:
             sensors.append(_create_board_entity(board, s))
     for fan in range(coordinator.miner.expected_fans or 4):
         for s in ["fan_speed"]:
