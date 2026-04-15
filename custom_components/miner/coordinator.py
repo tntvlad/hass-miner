@@ -897,7 +897,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                     "board_temperature_min": None,  # VNish only
                     "chip_temperature": board.chip_temp,
                     "chip_temperature_min": None,  # VNish only
-                    "board_hashrate": round(float(board.hashrate or 0), 2),
+                    "board_hashrate": normalize_hashrate_to_th(board.hashrate),
                 }
                 for board in miner_data.hashboards
             },
