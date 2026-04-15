@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+
+if TYPE_CHECKING:
+    from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_IP, DOMAIN, PYASIC_VERSION
 
@@ -131,3 +135,12 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         hass.data[DOMAIN].pop(config_entry.entry_id)
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Remove a device from the config entry."""
+    return True
