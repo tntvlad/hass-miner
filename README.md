@@ -10,7 +10,7 @@
 [![hacs][hacsbadge]][hacs]
 [![Project Maintenance][maintenance-shield]][user_profile]
 
-> **⚠️ BETA BRANCH** - This branch contains experimental features that are not yet merged to main.
+> **⚠️ BETA BRANCH** - This branch contains experimental features that are not yet merged to main. Current version: **v1.3.8-beta5**
 
 > **Note:** This is a fork of the original [Schnitzel/hass-miner](https://github.com/Schnitzel/hass-miner) which is no longer actively maintained. Full credit goes to [@Schnitzel](https://github.com/Schnitzel) and [@b-rowan](https://github.com/b-rowan) for creating this excellent integration.
 
@@ -22,27 +22,79 @@ Works great in coordination with [ESPHome](https://www.home-assistant.io/integra
 
 ## Beta Branch Features
 
-This beta branch includes new implementations not yet available in the main branch:
+This beta branch includes direct API implementations on top of pyasic, providing richer data and firmware-specific entities not available through pyasic alone.
 
-### Whatsminer M30S
-
-- **Power Limit Control** - Fixed power limit slider that was resetting after 2 seconds ([#1](https://github.com/tntvlad/hass-miner/issues/1))
-- **Auto API Enable** - Automatically enables Whatsminer API when "can't access write cmd" error occurs
-- **RPC Password Support** - Configure RPC password during setup for encrypted API commands
-
-> **Note:** Using pyasic 0.75.0 for compatibility with Home Assistant's pydantic version and because it includes the working Whatsminer API auto-enable feature.
-
+> **Note:** Uses pyasic 0.78.0 for compatibility with Home Assistant's pinned pydantic version.  
 > **Note:** Includes Python 3.14 compatibility patch for pydantic/pyasic interaction.
 
-> **Note:** If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
+---
 
-### Avalon Nano 3s
+### Braiins OS (BOS) — REST API
 
-- **CGMiner API** - Direct CGMiner API communication (port 4028)
-- **Work Mode Control** - Switch between Low/Mid/High mining modes
-- **LED Control** - RGB color picker and effect selection (Stay, Flash, Breathing, Loop)
-- **Mining Stats** - Best Share with auto-scaling (K/M/G/T/P/E/Z), Found Blocks
-- **Difficulty Scaling** - Automatic unit scaling for Best Difficulty values
+Direct integration with the Braiins OS Public REST API (`http://<miner>/api/v1`).  
+Tested with: **Antminer S21e Hyd.** running BOS firmware.
+
+> **Note:** The REST API was introduced in BOS firmware **23.03**. Older BOS firmware (e.g. S9 running BOS 22.08 or earlier) uses a **GraphQL API** at `/graphql` — those miners rely on pyasic only and do not benefit from the direct API sensors below.
+
+**Additional sensors beyond pyasic:**
+
+| Sensor | Source |
+|---|---|
+| Per-board Inlet Temperature | `GET /api/v1/miner/hw/hashboards` → `lowest_inlet_temp` |
+| Per-board Outlet Temperature | `GET /api/v1/miner/hw/hashboards` → `highest_outlet_temp` |
+| Per-board Real Hashrate | `GET /api/v1/miner/hw/hashboards` → `stats.real_hashrate.last_5m` |
+| Ideal Hashrate (total) | Sum of `stats.nominal_hashrate` across all boards |
+| Best Share | `GET /api/v1/miner/stats` → `miner_stats.best_share` |
+| Found Blocks | `GET /api/v1/miner/stats` → `miner_stats.found_blocks` |
+
+**Hydro miner support (e.g. S21e Hyd.):**
+- Fan entities are automatically suppressed for hydro-cooled models (no fans)
+- Inlet and outlet water temperatures exposed per hashboard
+
+**Supported API versions:** v1.2.0, v1.3.0 — see [docs/bos-api/README.md](docs/bos-api/README.md)
+
+---
+
+### VNish Firmware — REST API
+
+Direct integration with the VNish REST API (`http://<miner>/api/v1`).
+
+**Additional sensors beyond pyasic:**
+
+| Sensor | Source |
+|---|---|
+| Per-board PCB Temp (max) | `GET /api/v1/summary` → `miner.chains[].pcb_temp.max` |
+| Per-board PCB Temp (min) | `GET /api/v1/summary` → `miner.chains[].pcb_temp.min` |
+| Per-board Chip Temp (max) | `GET /api/v1/summary` → `miner.chains[].chip_temp.max` |
+| Per-board Chip Temp (min) | `GET /api/v1/summary` → `miner.chains[].chip_temp.min` |
+| Best Share | `GET /api/v1/summary` → `miner.best_share` |
+| Found Blocks | `GET /api/v1/summary` → `miner.found_blocks` |
+| Active Preset | `GET /api/v1/settings` → `miner.overclock.preset` |
+
+**Auth:** `POST /api/v1/unlock` with `{"pw": "<password>"}` → returns `token`. Used as `Authorization: <token>` header.
+
+---
+
+### Avalon Nano 3s — CGMiner API
+
+Direct CGMiner API communication on port 4028.
+
+- **Work Mode Control** — Switch between Low / Mid / High mining modes
+- **LED Control** — RGB color picker and effect selection (Stay, Flash, Breathing, Loop)
+- **Best Share** — Auto-scaling display (K/M/G/T/P/E/Z)
+- **Found Blocks** — Mining statistics
+
+---
+
+### Whatsminer M30S — pyasic + Auto-Enable
+
+- **Power Limit Control** — Fixed power limit slider that was resetting after 2 seconds ([#1](https://github.com/tntvlad/hass-miner/issues/1))
+- **Auto API Enable** — Automatically enables the Whatsminer write API when "can't access write cmd" error occurs
+- **RPC Password Support** — Configure RPC password during setup for encrypted API commands
+
+> If auto-enable fails, manually enable the API using WhatsMinerTool: Remote Ctrl → Miner API Switch → Enable
+
+---
 
 ### Support for:
 
@@ -108,15 +160,15 @@ Miner control and data is handled using [@UpstreamData](https://github.com/Upstr
 
 ## Known Issues (Beta)
 
-### Whatsminer M30S
-
-- **Chip Temperature** - May show "unknown" on some firmware versions (investigating)
-
 ### Avalon Nano 3s
 
-- **LED Brightness** - Brightness slider not working correctly (WRGB format investigation needed)
-- **Mining Enable/Disable** - `ascenable`/`ascdisable` command format needs investigation
-- **Restart Function** - Miner restart service not yet implemented
+- **LED Brightness** — Brightness slider not working correctly (WRGB format investigation needed)
+- **Mining Enable/Disable** — `ascenable`/`ascdisable` command format needs investigation
+- **Restart Function** — Miner restart service not yet implemented
+
+### Whatsminer M30S
+
+- **Chip Temperature** — May show "unknown" on some firmware versions (investigating)
 
 ---
 

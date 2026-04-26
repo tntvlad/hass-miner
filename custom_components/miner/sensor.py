@@ -73,6 +73,22 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
+    "inlet_temperature": SensorEntityDescription(
+        key="Inlet Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "outlet_temperature": SensorEntityDescription(
+        key="Outlet Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     "hashrate": SensorEntityDescription(
         key="Hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
@@ -191,17 +207,23 @@ async def async_setup_entry(
             continue
         sensors.append(_create_miner_entity(s))
 
-    # Build board sensor list - min temps only for VNish
+    # Build board sensor list - min temps for VNish, inlet/outlet for BOS
+    is_bos = _is_bos_miner(coordinator.miner, coordinator.data.get("fw_ver", ""))
     board_sensors = ["board_temperature", "chip_temperature", "board_hashrate"]
     if is_vnish:
         board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]
+    elif is_bos:
+        board_sensors = ["board_temperature", "inlet_temperature", "outlet_temperature", "chip_temperature", "board_hashrate"]
 
     for board in range(coordinator.miner.expected_hashboards or 3):
         for s in board_sensors:
             sensors.append(_create_board_entity(board, s))
-    for fan in range(coordinator.miner.expected_fans or len(coordinator.data.get("fan_sensors", {})) or 2):
-        for s in ["fan_speed"]:
-            sensors.append(_create_fan_entity(fan, s))
+    model_name = coordinator.data.get("model", "") or ""
+    is_hydro = "hyd" in model_name.lower()
+    if not is_hydro:
+        for fan in range(coordinator.miner.expected_fans or len(coordinator.data.get("fan_sensors", {})) or 2):
+            for s in ["fan_speed"]:
+                sensors.append(_create_fan_entity(fan, s))
 
     # Add Avalon-specific sensors (Best Share, Found Blocks)
     if _is_avalon_nano_miner(coordinator.miner):

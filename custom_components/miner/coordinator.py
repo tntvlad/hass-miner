@@ -442,6 +442,153 @@ def _is_bos_miner(miner, fw_ver: str = "") -> bool:
     return False
 
 
+def _is_hydro_miner(model: str) -> bool:
+    """Check if miner is a hydro-cooled (no fans) model."""
+    if not model:
+        return False
+    return "hyd" in model.lower()
+
+
+async def _bos_rest_login(
+    session, ip: str, username: str, password: str
+) -> str | None:
+    """Authenticate with BOS REST API and return session token.
+
+    BOS REST API uses raw token in Authorization header (no Bearer prefix).
+    """
+    import aiohttp
+
+    try:
+        async with session.post(
+            f"http://{ip}/api/v1/auth/login",
+            json={"username": username, "password": password},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.debug("BOS REST %s: login failed with status %s", ip, resp.status)
+                return None
+            data = await resp.json()
+            return data.get("token")
+    except Exception as e:
+        _LOGGER.debug("BOS REST %s: login error: %s", ip, e)
+        return None
+
+
+async def _fetch_bos_rest_stats(
+    ip: str, username: str = "root", password: str = "root"
+) -> dict | None:
+    """Fetch miner stats (best_share, found_blocks) from BOS miner via REST API.
+
+    Uses GET /api/v1/miner/stats.
+    """
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            token = await _bos_rest_login(session, ip, username, password)
+            if not token:
+                return None
+
+            async with session.get(
+                f"http://{ip}/api/v1/miner/stats",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("BOS REST %s: miner/stats failed: %s", ip, resp.status)
+                    return None
+                data = await resp.json()
+
+            miner_stats = data.get("miner_stats", {})
+            return {
+                "best_share": miner_stats.get("best_share", 0),
+                "found_blocks": miner_stats.get("found_blocks", 0),
+            }
+    except Exception as e:
+        _LOGGER.debug("BOS REST %s: stats fetch error: %s", ip, e)
+        return None
+
+
+async def _fetch_bos_rest_hashboards(
+    ip: str, username: str = "root", password: str = "root"
+) -> dict | None:
+    """Fetch hashboard temperatures from BOS miner via REST API.
+
+    Uses GET /api/v1/miner/hw/hashboards.
+    Returns dict keyed by 0-based slot index with temperature values.
+    """
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            token = await _bos_rest_login(session, ip, username, password)
+            if not token:
+                return None
+
+            async with session.get(
+                f"http://{ip}/api/v1/miner/hw/hashboards",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "BOS REST %s: miner/hw/hashboards failed: %s", ip, resp.status
+                    )
+                    return None
+                data = await resp.json()
+
+            result = {}
+            for board in data.get("hashboards", []):
+                board_id = board.get("id", "1")
+                try:
+                    slot = int(board_id) - 1
+                except (ValueError, TypeError):
+                    slot = 0
+
+                board_temp = (board.get("board_temp") or {}).get("degree_c")
+                chip_temp = (
+                    (board.get("highest_chip_temp") or {})
+                    .get("temperature", {})
+                    .get("degree_c")
+                )
+                inlet_temp = (board.get("lowest_inlet_temp") or {}).get("degree_c")
+                outlet_temp = (board.get("highest_outlet_temp") or {}).get("degree_c")
+                stats = board.get("stats") or {}
+                hashrate_gh = (
+                    stats
+                    .get("real_hashrate", {})
+                    .get("last_5m", {})
+                    .get("gigahash_per_second")
+                )
+                board_hashrate_th = (
+                    round(hashrate_gh / 1000, 2) if hashrate_gh is not None else None
+                )
+                nominal_gh = (
+                    (stats.get("nominal_hashrate") or {})
+                    .get("gigahash_per_second")
+                )
+                board_nominal_hashrate_th = (
+                    round(nominal_gh / 1000, 2) if nominal_gh is not None else None
+                )
+
+                result[slot] = {
+                    "board_temperature": board_temp,
+                    "board_temperature_min": inlet_temp,
+                    "chip_temperature": chip_temp,
+                    "chip_temperature_min": outlet_temp,
+                    "inlet_temperature": inlet_temp,
+                    "outlet_temperature": outlet_temp,
+                    "board_hashrate": board_hashrate_th,
+                    "board_nominal_hashrate": board_nominal_hashrate_th,
+                }
+
+            _LOGGER.debug("BOS REST %s: hashboards result: %s", ip, result)
+            return result if result else None
+    except Exception as e:
+        _LOGGER.debug("BOS REST %s: hashboards fetch error: %s", ip, e)
+        return None
+
+
 async def _fetch_bos_miner_stats(
     ip: str, username: str = "root", password: str = "root"
 ) -> dict | None:
@@ -897,6 +1044,8 @@ class MinerCoordinator(DataUpdateCoordinator):
                     "board_temperature_min": None,  # VNish only
                     "chip_temperature": board.chip_temp,
                     "chip_temperature_min": None,  # VNish only
+                    "inlet_temperature": None,  # BOS only
+                    "outlet_temperature": None,  # BOS only
                     "board_hashrate": normalize_hashrate_to_th(board.hashrate),
                 }
                 for board in miner_data.hashboards
@@ -1007,15 +1156,47 @@ class MinerCoordinator(DataUpdateCoordinator):
                     self.miner.ip,
                 )
 
-        # Fetch BOS miner stats (Best Share, Found Blocks) via gRPC
+        # Fetch BOS miner stats and hashboard temps via REST API
         if _is_bos_miner(self.miner, miner_data.fw_ver):
-            bos_stats = await _fetch_bos_miner_stats(
-                self.miner.ip,
-                self.config_entry.data.get(CONF_WEB_USERNAME, "root"),
-                self.config_entry.data.get(CONF_WEB_PASSWORD, "root"),
+            web_username = self.config_entry.data.get(CONF_WEB_USERNAME, "root")
+            web_password = self.config_entry.data.get(CONF_WEB_PASSWORD, "root")
+
+            bos_stats = await _fetch_bos_rest_stats(
+                self.miner.ip, web_username, web_password
             )
             if bos_stats:
                 data["bos_best_share"] = bos_stats.get("best_share")
                 data["bos_found_blocks"] = bos_stats.get("found_blocks")
+
+            bos_hashboards = await _fetch_bos_rest_hashboards(
+                self.miner.ip, web_username, web_password
+            )
+            if bos_hashboards:
+                _LOGGER.debug(
+                    "BOS REST %s: replacing pyasic board temps with REST API data",
+                    self.miner.ip,
+                )
+                for slot, temps in bos_hashboards.items():
+                    if slot in data["board_sensors"]:
+                        data["board_sensors"][slot].update(temps)
+                    else:
+                        data["board_sensors"][slot] = temps
+
+                # Use sum of nominal hashrates from REST API as ideal_hashrate
+                total_nominal = sum(
+                    v.get("board_nominal_hashrate") or 0 for v in bos_hashboards.values()
+                )
+                if total_nominal:
+                    data["miner_sensors"]["ideal_hashrate"] = round(total_nominal, 2)
+
+            # Hydro-cooled miners have no fans — clear any fan sensors from pyasic
+            model = data.get("model") or miner_data.model or ""
+            if _is_hydro_miner(model):
+                data["fan_sensors"] = {}
+                _LOGGER.debug(
+                    "BOS REST %s: hydro miner detected (%s), suppressing fan sensors",
+                    self.miner.ip,
+                    model,
+                )
 
         return data
