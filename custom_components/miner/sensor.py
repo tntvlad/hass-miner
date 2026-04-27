@@ -89,6 +89,24 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         device_class=SensorDeviceClass.TEMPERATURE,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    "water_inlet_temperature": SensorEntityDescription(
+        key="Est. Water Inlet Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    "water_outlet_temperature": SensorEntityDescription(
+        key="Est. Water Outlet Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
     "hashrate": SensorEntityDescription(
         key="Hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
@@ -213,7 +231,7 @@ async def async_setup_entry(
     if is_vnish:
         board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]
     elif is_bos:
-        board_sensors = ["board_temperature", "inlet_temperature", "outlet_temperature", "chip_temperature", "board_hashrate"]
+        board_sensors = ["board_temperature", "inlet_temperature", "outlet_temperature", "chip_temperature", "water_inlet_temperature", "water_outlet_temperature", "board_hashrate"]
 
     for board in range(coordinator.miner.expected_hashboards or 3):
         for s in board_sensors:

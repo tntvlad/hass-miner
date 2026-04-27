@@ -553,6 +553,25 @@ async def _fetch_bos_rest_hashboards(
                 )
                 inlet_temp = (board.get("lowest_inlet_temp") or {}).get("degree_c")
                 outlet_temp = (board.get("highest_outlet_temp") or {}).get("degree_c")
+
+                # Estimated water circuit temperatures.
+                # The BOS API does not expose water inlet/outlet temperatures
+                # directly. The BOS web UI reports them but the values are not
+                # available in /api/v1/miner/hw/hashboards or any other public
+                # endpoint on firmware <=26.04-plus. Empirical comparison
+                # against the BOS fleet dashboard on an Antminer S21e Hydro
+                # shows the following relationships (per board):
+                #   water_outlet ≈ lowest_inlet_temp + 0.85 °C  (±0.2 °C)
+                #   water_inlet  ≈ lowest_inlet_temp - 8.60 °C  (±1.0 °C)
+                # These are approximations only; actual water temperatures may
+                # differ depending on flow rate, ambient and load.
+                if inlet_temp is not None:
+                    water_outlet_est = round(inlet_temp + 0.85, 1)
+                    water_inlet_est = round(inlet_temp - 8.6, 1)
+                else:
+                    water_outlet_est = None
+                    water_inlet_est = None
+
                 stats = board.get("stats") or {}
                 hashrate_gh = (
                     stats
@@ -578,6 +597,8 @@ async def _fetch_bos_rest_hashboards(
                     "chip_temperature_min": outlet_temp,
                     "inlet_temperature": inlet_temp,
                     "outlet_temperature": outlet_temp,
+                    "water_inlet_temperature": water_inlet_est,
+                    "water_outlet_temperature": water_outlet_est,
                     "board_hashrate": board_hashrate_th,
                     "board_nominal_hashrate": board_nominal_hashrate_th,
                 }
@@ -1046,6 +1067,8 @@ class MinerCoordinator(DataUpdateCoordinator):
                     "chip_temperature_min": None,  # VNish only
                     "inlet_temperature": None,  # BOS only
                     "outlet_temperature": None,  # BOS only
+                    "water_inlet_temperature": None,  # BOS only (estimated)
+                    "water_outlet_temperature": None,  # BOS only (estimated)
                     "board_hashrate": normalize_hashrate_to_th(board.hashrate),
                 }
                 for board in miner_data.hashboards
