@@ -60,8 +60,16 @@ DEFAULT_DATA = {
     "vnish_preset": None,
     "vnish_best_share": None,
     "vnish_found_blocks": None,
+    "vnish_voltage": None,
+    "vnish_freq": None,
+    "vnish_min_voltage": None,
+    "vnish_max_voltage": None,
+    "vnish_min_freq": None,
+    "vnish_max_freq": None,
     "bos_best_share": None,
     "bos_found_blocks": None,
+    "bitaxe_best_share": None,
+    "bitaxe_found_blocks": None,
 }
 
 
@@ -390,6 +398,146 @@ async def _fetch_vnish_temperatures(ip: str, password: str = "admin") -> dict | 
     return None
 
 
+async def _fetch_vnish_overclock_limits(ip: str, timeout: int = 10) -> dict | None:
+    """Fetch overclock min/max constraints from VNish /api/v1/ui (no auth required).
+
+    Returns dict with keys: min_voltage, max_voltage, min_freq, max_freq (all ints).
+    Voltage in mV (e.g. 1400–1700), frequency in MHz (e.g. 50–1000).
+    """
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://{ip}/api/v1/ui",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("VNish %s: /api/v1/ui failed with status %s", ip, resp.status)
+                    return None
+                data = await resp.json(content_type=None)
+                oc = data.get("consts", {}).get("overclock", {})
+                if not oc:
+                    return None
+                return {
+                    "min_voltage": int(oc.get("min_voltage", 1400)),
+                    "max_voltage": int(oc.get("max_voltage", 1700)),
+                    "default_voltage": int(oc.get("default_voltage", 1530)),
+                    "min_freq": int(oc.get("min_freq", 50)),
+                    "max_freq": int(oc.get("max_freq", 1000)),
+                    "default_freq": int(oc.get("default_freq", 645)),
+                    "warn_freq": int(oc.get("warn_freq", 670)),
+                }
+    except Exception as e:
+        _LOGGER.debug("VNish %s: failed to fetch /api/v1/ui: %s", ip, e)
+    return None
+
+
+async def _fetch_vnish_overclock_settings(ip: str, password: str = "admin") -> dict | None:
+    """Fetch current global overclock settings (volt + freq) from VNish via /api/v1/settings.
+
+    Requires authentication. Returns dict with keys: voltage (mV), freq (MHz).
+    """
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                token = (await resp.json()).get("token")
+                if not token:
+                    return None
+
+            async with session.get(
+                f"{base_url}/settings",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json(content_type=None)
+                globals_ = data.get("miner", {}).get("overclock", {}).get("globals", {})
+                if not globals_:
+                    return None
+                return {
+                    "voltage": int(globals_.get("volt", 1530)),
+                    "freq": int(globals_.get("freq", 645)),
+                }
+    except Exception as e:
+        _LOGGER.debug("VNish %s: failed to fetch overclock settings: %s", ip, e)
+    return None
+
+
+async def _set_vnish_overclock(
+    ip: str, freq: int | None = None, voltage: int | None = None, password: str = "admin"
+) -> bool:
+    """Set global overclock voltage and/or frequency on a VNish miner.
+
+    Reads current settings first, patches only the provided values, then POSTs back.
+    Voltage in mV, frequency in MHz.
+    """
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("VNish %s: unlock failed: %s", ip, resp.status)
+                    return False
+                token = (await resp.json()).get("token")
+                if not token:
+                    return False
+
+            # Read current full settings
+            async with session.get(
+                f"{base_url}/settings",
+                headers={"Authorization": token},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return False
+                current = await resp.json(content_type=None)
+
+            # Patch only the globals we want to change
+            try:
+                globals_ = current["miner"]["overclock"]["globals"]
+                if freq is not None:
+                    globals_["freq"] = int(freq)
+                if voltage is not None:
+                    globals_["volt"] = int(voltage)
+            except (KeyError, TypeError) as e:
+                _LOGGER.debug("VNish %s: could not patch settings: %s", ip, e)
+                return False
+
+            # POST back the full settings object
+            async with session.post(
+                f"{base_url}/settings",
+                headers={"Authorization": token},
+                json=current,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                success = resp.status == 200
+                _LOGGER.debug(
+                    "VNish %s: POST /settings status=%s freq=%s volt=%s",
+                    ip, resp.status, freq, voltage
+                )
+                return success
+    except Exception as e:
+        _LOGGER.debug("VNish %s: failed to set overclock: %s", ip, e)
+    return False
+
+
 def _is_vnish_miner(miner, fw_ver: str = "") -> bool:
     """Check if miner is running VNish firmware."""
     if miner is None:
@@ -440,6 +588,45 @@ def _is_bos_miner(miner, fw_ver: str = "") -> bool:
         return True
 
     return False
+
+
+def _is_bitaxe_miner(miner) -> bool:
+    """Check if miner is a BitAxe (ESPMiner-based) device."""
+    if miner is None:
+        return False
+    miner_class_name = miner.__class__.__name__.lower()
+    if "bitaxe" in miner_class_name:
+        return True
+    # Check class hierarchy names
+    for cls in type(miner).__mro__:
+        if "bitaxe" in cls.__name__.lower():
+            return True
+    return False
+
+
+async def _fetch_bitaxe_summary(ip: str, timeout: int = 10) -> dict | None:
+    """Fetch best share and found blocks from BitAxe via /api/system/info."""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://{ip}/api/system/info",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("BitAxe %s: system/info failed with status %s", ip, resp.status)
+                    return None
+                data = await resp.json(content_type=None)
+                result = {}
+                if "bestDiff" in data:
+                    result["best_share"] = data["bestDiff"]
+                if "blockFound" in data:
+                    result["found_blocks"] = int(data["blockFound"])
+                return result if result else None
+    except Exception as e:
+        _LOGGER.debug("BitAxe %s: failed to fetch system/info: %s", ip, e)
+    return None
 
 
 def _is_hydro_miner(model: str) -> bool:
@@ -1089,8 +1276,16 @@ class MinerCoordinator(DataUpdateCoordinator):
             "vnish_preset": None,
             "vnish_best_share": None,
             "vnish_found_blocks": None,
+            "vnish_voltage": None,
+            "vnish_freq": None,
+            "vnish_min_voltage": None,
+            "vnish_max_voltage": None,
+            "vnish_min_freq": None,
+            "vnish_max_freq": None,
             "bos_best_share": None,
             "bos_found_blocks": None,
+            "bitaxe_best_share": None,
+            "bitaxe_found_blocks": None,
         }
 
         # Fetch workmode for Avalon Nano miners (only in full CGMiner mode)
@@ -1137,6 +1332,20 @@ class MinerCoordinator(DataUpdateCoordinator):
             if vnish_summary:
                 data["vnish_best_share"] = vnish_summary.get("best_share")
                 data["vnish_found_blocks"] = vnish_summary.get("found_blocks")
+
+            # Fetch VNish overclock limits (no auth required)
+            vnish_limits = await _fetch_vnish_overclock_limits(self.miner.ip)
+            if vnish_limits:
+                data["vnish_min_voltage"] = vnish_limits["min_voltage"]
+                data["vnish_max_voltage"] = vnish_limits["max_voltage"]
+                data["vnish_min_freq"] = vnish_limits["min_freq"]
+                data["vnish_max_freq"] = vnish_limits["max_freq"]
+
+            # Fetch current overclock settings (volt + freq)
+            vnish_oc = await _fetch_vnish_overclock_settings(self.miner.ip, web_password)
+            if vnish_oc:
+                data["vnish_voltage"] = vnish_oc["voltage"]
+                data["vnish_freq"] = vnish_oc["freq"]
 
             # Always fetch VNish temperatures directly (bypass pyasic completely)
             vnish_temps = await _fetch_vnish_temperatures(
@@ -1221,5 +1430,12 @@ class MinerCoordinator(DataUpdateCoordinator):
                     self.miner.ip,
                     model,
                 )
+
+        # Fetch BitAxe summary data (Best Share, Found Blocks)
+        if _is_bitaxe_miner(self.miner):
+            bitaxe_summary = await _fetch_bitaxe_summary(self.miner.ip)
+            if bitaxe_summary:
+                data["bitaxe_best_share"] = bitaxe_summary.get("best_share")
+                data["bitaxe_found_blocks"] = bitaxe_summary.get("found_blocks")
 
         return data

@@ -24,7 +24,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_WEB_PASSWORD, CONF_WEB_USERNAME, DOMAIN
-from .coordinator import MinerCoordinator
+from .coordinator import MinerCoordinator, _is_vnish_miner, _set_vnish_overclock
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +61,16 @@ async def async_setup_entry(
                     coordinator=coordinator,
                     entity_description=NUMBER_DESCRIPTION_KEY_MAP["power_limit"],
                 )
+            ]
+        )
+
+    # Add VNish voltage and frequency number entities
+    fw_ver = coordinator.data.get("fw_ver", "") or ""
+    if _is_vnish_miner(coordinator.miner, fw_ver):
+        async_add_entities(
+            [
+                VNishVoltageNumber(coordinator=coordinator),
+                VNishFrequencyNumber(coordinator=coordinator),
             ]
         )
 
@@ -534,3 +544,144 @@ mutation ($tuneInput: AutotuningIn!, $apply: Boolean!) {
     def available(self) -> bool:
         """Return if entity is available or not."""
         return self.coordinator.available
+
+
+class _VNishOverclockBase(CoordinatorEntity[MinerCoordinator], NumberEntity):
+    """Base class for VNish voltage/frequency number entities."""
+
+    _data_key: str
+    _min_key: str
+    _max_key: str
+
+    def __init__(self, coordinator: MinerCoordinator) -> None:
+        super().__init__(coordinator=coordinator)
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data["mac"])},
+            connections={
+                ("ip", self.coordinator.data["ip"]),
+                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
+            },
+            configuration_url=f"http://{self.coordinator.data['ip']}",
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.get(self._data_key)
+
+    @property
+    def native_min_value(self) -> float:
+        return self.coordinator.data.get(self._min_key) or self._default_min
+
+    @property
+    def native_max_value(self) -> float:
+        return self.coordinator.data.get(self._max_key) or self._default_max
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.available and self.coordinator.data.get(self._data_key) is not None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        super()._handle_coordinator_update()
+
+    def _get_password(self) -> str:
+        return self.coordinator.config_entry.data.get(CONF_WEB_PASSWORD, "admin")
+
+
+class VNishVoltageNumber(_VNishOverclockBase):
+    """Number entity to control VNish global voltage (mV)."""
+
+    _data_key = "vnish_voltage"
+    _min_key = "vnish_min_voltage"
+    _max_key = "vnish_max_voltage"
+    _default_min = 1400
+    _default_max = 1700
+
+    @property
+    def name(self) -> str:
+        return f"{self.coordinator.config_entry.title} Voltage"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self.coordinator.data['mac']}-vnish-voltage"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "mV"
+
+    @property
+    def native_step(self) -> float:
+        return 1
+
+    @property
+    def icon(self) -> str:
+        return "mdi:lightning-bolt"
+
+    @property
+    def entity_category(self):
+        return EntityCategory.CONFIG
+
+    async def async_set_native_value(self, value: float) -> None:
+        password = self._get_password()
+        success = await _set_vnish_overclock(
+            self.coordinator.data["ip"], voltage=int(value), password=password
+        )
+        if not success:
+            _LOGGER.error(
+                "%s: failed to set VNish voltage to %s mV",
+                self.coordinator.config_entry.title, value
+            )
+        await self.coordinator.async_request_refresh()
+
+
+class VNishFrequencyNumber(_VNishOverclockBase):
+    """Number entity to control VNish global frequency (MHz)."""
+
+    _data_key = "vnish_freq"
+    _min_key = "vnish_min_freq"
+    _max_key = "vnish_max_freq"
+    _default_min = 50
+    _default_max = 1000
+
+    @property
+    def name(self) -> str:
+        return f"{self.coordinator.config_entry.title} Frequency"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self.coordinator.data['mac']}-vnish-frequency"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "MHz"
+
+    @property
+    def native_step(self) -> float:
+        return 1
+
+    @property
+    def icon(self) -> str:
+        return "mdi:sine-wave"
+
+    @property
+    def entity_category(self):
+        return EntityCategory.CONFIG
+
+    async def async_set_native_value(self, value: float) -> None:
+        password = self._get_password()
+        success = await _set_vnish_overclock(
+            self.coordinator.data["ip"], freq=int(value), password=password
+        )
+        if not success:
+            _LOGGER.error(
+                "%s: failed to set VNish frequency to %s MHz",
+                self.coordinator.config_entry.title, value
+            )
+        await self.coordinator.async_request_refresh()
