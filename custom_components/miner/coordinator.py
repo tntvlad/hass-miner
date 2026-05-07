@@ -407,27 +407,26 @@ async def _fetch_vnish_overclock_limits(ip: str, timeout: int = 10) -> dict | No
     import aiohttp
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"http://{ip}/api/v1/ui",
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                if resp.status != 200:
-                    _LOGGER.debug("VNish %s: /api/v1/ui failed with status %s", ip, resp.status)
-                    return None
-                data = await resp.json(content_type=None)
-                oc = data.get("consts", {}).get("overclock", {})
-                if not oc:
-                    return None
-                return {
-                    "min_voltage": int(oc.get("min_voltage", 1400)),
-                    "max_voltage": int(oc.get("max_voltage", 1700)),
-                    "default_voltage": int(oc.get("default_voltage", 1530)),
-                    "min_freq": int(oc.get("min_freq", 50)),
-                    "max_freq": int(oc.get("max_freq", 1000)),
-                    "default_freq": int(oc.get("default_freq", 645)),
-                    "warn_freq": int(oc.get("warn_freq", 670)),
-                }
+        async with aiohttp.ClientSession() as session, session.get(
+            f"http://{ip}/api/v1/ui",
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.debug("VNish %s: /api/v1/ui failed with status %s", ip, resp.status)
+                return None
+            data = await resp.json(content_type=None)
+            oc = data.get("consts", {}).get("overclock", {})
+            if not oc:
+                return None
+            return {
+                "min_voltage": int(oc.get("min_voltage", 1400)),
+                "max_voltage": int(oc.get("max_voltage", 1700)),
+                "default_voltage": int(oc.get("default_voltage", 1530)),
+                "min_freq": int(oc.get("min_freq", 50)),
+                "max_freq": int(oc.get("max_freq", 1000)),
+                "default_freq": int(oc.get("default_freq", 645)),
+                "warn_freq": int(oc.get("warn_freq", 670)),
+            }
     except Exception as e:
         _LOGGER.debug("VNish %s: failed to fetch /api/v1/ui: %s", ip, e)
     return None
@@ -609,21 +608,20 @@ async def _fetch_bitaxe_summary(ip: str, timeout: int = 10) -> dict | None:
     import aiohttp
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"http://{ip}/api/system/info",
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                if resp.status != 200:
-                    _LOGGER.debug("BitAxe %s: system/info failed with status %s", ip, resp.status)
-                    return None
-                data = await resp.json(content_type=None)
-                result = {}
-                if "bestDiff" in data:
-                    result["best_share"] = data["bestDiff"]
-                if "blockFound" in data:
-                    result["found_blocks"] = int(data["blockFound"])
-                return result if result else None
+        async with aiohttp.ClientSession() as session, session.get(
+            f"http://{ip}/api/system/info",
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.debug("BitAxe %s: system/info failed with status %s", ip, resp.status)
+                return None
+            data = await resp.json(content_type=None)
+            result = {}
+            if "bestDiff" in data:
+                result["best_share"] = data["bestDiff"]
+            if "blockFound" in data:
+                result["found_blocks"] = int(data["blockFound"])
+            return result if result else None
     except Exception as e:
         _LOGGER.debug("BitAxe %s: failed to fetch system/info: %s", ip, e)
     return None

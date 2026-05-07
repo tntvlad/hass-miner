@@ -606,29 +606,36 @@ class VNishVoltageNumber(_VNishOverclockBase):
 
     @property
     def name(self) -> str:
+        """Return entity name."""
         return f"{self.coordinator.config_entry.title} Voltage"
 
     @property
     def unique_id(self) -> str:
+        """Return unique entity id."""
         return f"{self.coordinator.data['mac']}-vnish-voltage"
 
     @property
     def native_unit_of_measurement(self) -> str:
+        """Return unit of measurement."""
         return "mV"
 
     @property
     def native_step(self) -> float:
+        """Return step size."""
         return 1
 
     @property
     def icon(self) -> str:
+        """Return icon."""
         return "mdi:lightning-bolt"
 
     @property
     def entity_category(self):
+        """Return entity category."""
         return EntityCategory.CONFIG
 
     async def async_set_native_value(self, value: float) -> None:
+        """Set new voltage value."""
         password = self._get_password()
         success = await _set_vnish_overclock(
             self.coordinator.data["ip"], voltage=int(value), password=password
@@ -652,29 +659,36 @@ class VNishFrequencyNumber(_VNishOverclockBase):
 
     @property
     def name(self) -> str:
+        """Return entity name."""
         return f"{self.coordinator.config_entry.title} Frequency"
 
     @property
     def unique_id(self) -> str:
+        """Return unique entity id."""
         return f"{self.coordinator.data['mac']}-vnish-frequency"
 
     @property
     def native_unit_of_measurement(self) -> str:
+        """Return unit of measurement."""
         return "MHz"
 
     @property
     def native_step(self) -> float:
+        """Return step size."""
         return 1
 
     @property
     def icon(self) -> str:
+        """Return icon."""
         return "mdi:sine-wave"
 
     @property
     def entity_category(self):
+        """Return entity category."""
         return EntityCategory.CONFIG
 
     async def async_set_native_value(self, value: float) -> None:
+        """Set new frequency value."""
         password = self._get_password()
         success = await _set_vnish_overclock(
             self.coordinator.data["ip"], freq=int(value), password=password
