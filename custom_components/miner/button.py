@@ -51,17 +51,15 @@ class AvalonRebootButton(CoordinatorEntity[MinerCoordinator], ButtonEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.data['mac']}-reboot"
+        return f"{self.coordinator.config_entry.entry_id}-reboot"
 
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device info."""
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],

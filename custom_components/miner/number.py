@@ -98,12 +98,10 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device info."""
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -114,7 +112,7 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.data['mac']}-power_limit"
+        return f"{self.coordinator.config_entry.entry_id}-power_limit"
 
     @property
     def native_min_value(self) -> float | None:
@@ -558,12 +556,10 @@ class _VNishOverclockBase(CoordinatorEntity[MinerCoordinator], NumberEntity):
 
     @property
     def device_info(self) -> entity.DeviceInfo:
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -612,7 +608,7 @@ class VNishVoltageNumber(_VNishOverclockBase):
     @property
     def unique_id(self) -> str:
         """Return unique entity id."""
-        return f"{self.coordinator.data['mac']}-vnish-voltage"
+        return f"{self.coordinator.config_entry.entry_id}-vnish-voltage"
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -665,7 +661,7 @@ class VNishFrequencyNumber(_VNishOverclockBase):
     @property
     def unique_id(self) -> str:
         """Return unique entity id."""
-        return f"{self.coordinator.data['mac']}-vnish-frequency"
+        return f"{self.coordinator.config_entry.entry_id}-vnish-frequency"
 
     @property
     def native_unit_of_measurement(self) -> str:

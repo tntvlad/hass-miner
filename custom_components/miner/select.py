@@ -429,12 +429,10 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device info."""
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -445,7 +443,7 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.data['mac']}-workmode"
+        return f"{self.coordinator.config_entry.entry_id}-workmode"
 
     @property
     def current_option(self) -> str | None:
@@ -523,12 +521,10 @@ class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device info."""
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -539,7 +535,7 @@ class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.data['mac']}-led_effect"
+        return f"{self.coordinator.config_entry.entry_id}-led_effect"
 
     @property
     def current_option(self) -> str | None:
@@ -629,12 +625,10 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device registry information for this entity."""
+        mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.data["mac"])},
-            connections={
-                ("ip", self.coordinator.data["ip"]),
-                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
-            },
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -645,7 +639,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @property
     def unique_id(self) -> str | None:
         """Return a unique ID for this entity."""
-        return f"{self.coordinator.data['mac']}-vnish_preset"
+        return f"{self.coordinator.config_entry.entry_id}-vnish_preset"
 
     @property
     def options(self) -> list[str]:
