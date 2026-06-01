@@ -1050,7 +1050,7 @@ class MinerCoordinator(DataUpdateCoordinator):
             logger=_LOGGER,
             config_entry=entry,
             name=entry.title,
-            update_interval=timedelta(seconds=10),
+            update_interval=timedelta(seconds=60),
             request_refresh_debouncer=Debouncer(
                 hass,
                 _LOGGER,
@@ -1068,24 +1068,37 @@ class MinerCoordinator(DataUpdateCoordinator):
         """Get a valid Miner instance."""
         import pyasic  # lazy import to avoid blocking event loop
 
+        # detect-once: reuse a previously detected miner instead of re-running the
+        # slow, under-load-flaky auto-detection on every poll.
+        if self.miner is not None:
+            return self.miner
+
         miner_ip = self.config_entry.data[CONF_IP]
-        miner = await pyasic.get_miner(miner_ip)
+        # Hard timeout: pyasic auto-detection has no internal timeout and can hang
+        # indefinitely on a flaky/unreachable miner, blocking setup and the loop.
+        try:
+            miner = await asyncio.wait_for(pyasic.get_miner(miner_ip), timeout=15)
+        except (TimeoutError, asyncio.TimeoutError):
+            _LOGGER.warning("get_miner timed out for %s - treating as offline", miner_ip)
+            return None
         if miner is None:
             return None
 
-        self.miner = miner
-        if self.miner.api is not None:
-            if self.miner.api.pwd is not None:
-                self.miner.api.pwd = self.config_entry.data.get(CONF_RPC_PASSWORD, "")
+        if miner.api is not None and miner.api.pwd is not None:
+            miner.api.pwd = self.config_entry.data.get(CONF_RPC_PASSWORD, "")
+        if miner.web is not None:
+            miner.web.username = self.config_entry.data.get(CONF_WEB_USERNAME, "")
+            miner.web.pwd = self.config_entry.data.get(CONF_WEB_PASSWORD, "")
+        if miner.ssh is not None:
+            miner.ssh.username = self.config_entry.data.get(CONF_SSH_USERNAME, "")
+            miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
 
-        if self.miner.web is not None:
-            self.miner.web.username = self.config_entry.data.get(CONF_WEB_USERNAME, "")
-            self.miner.web.pwd = self.config_entry.data.get(CONF_WEB_PASSWORD, "")
-
-        if self.miner.ssh is not None:
-            self.miner.ssh.username = self.config_entry.data.get(CONF_SSH_USERNAME, "")
-            self.miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
-        return self.miner
+        # Only cache a *complete* detection. Under load pyasic may return a generic
+        # result (model unset) that yields zeroed data; don't freeze on it - re-detect
+        # next poll until a full detection succeeds.
+        if getattr(miner, "model", None):
+            self.miner = miner
+        return miner
 
     async def _async_update_data(self):
         """Fetch sensors from miners."""
