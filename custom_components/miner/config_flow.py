@@ -116,7 +116,7 @@ def _is_avalon_miner(miner) -> bool:
 class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Miner."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self):
         """Initialize."""

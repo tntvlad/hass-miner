@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_IP, DOMAIN, PYASIC_VERSION
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -123,6 +126,67 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
     await async_setup_services(hass)
 
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate the entry_id-based identity to a stable MAC-based one (see #19/#22).
+
+    v1 derived every device identifier and entity unique_id from entry_id, so a
+    delete + re-add orphaned all entities. v2 anchors them on the miner MAC.
+    Entity_ids are preserved (only unique_id changes), so nothing breaks.
+    """
+    if config_entry.version >= 2:
+        return True
+
+    from homeassistant.helpers import device_registry as dr_
+    from homeassistant.helpers import entity_registry as er_
+    from homeassistant.helpers.device_registry import format_mac
+
+    # The MAC can only be read from the live miner.
+    mac = None
+    try:
+        pyasic = await hass.async_add_executor_job(_ensure_pyasic)
+        miner = await pyasic.get_miner(config_entry.data[CONF_IP])
+        if miner is not None:
+            data = await miner.get_data()
+            mac = getattr(data, "mac", None)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("MAC lookup during migration failed", exc_info=True)
+
+    if not mac:
+        # Miner offline: keep v1 (entities still work via the entry_id fallback);
+        # migration retries on the next restart when the miner is reachable.
+        _LOGGER.warning(
+            "Miner '%s' migration deferred: MAC not readable (miner offline)",
+            config_entry.title,
+        )
+        return True
+
+    new_base = format_mac(mac)
+    old_base = config_entry.entry_id
+    prefix = f"{old_base}-"
+
+    ent_reg = er_.async_get(hass)
+    for entity in er_.async_entries_for_config_entry(ent_reg, config_entry.entry_id):
+        if entity.unique_id.startswith(prefix):
+            new_uid = f"{new_base}-{entity.unique_id[len(prefix):]}"
+            if ent_reg.async_get_entity_id(entity.domain, DOMAIN, new_uid) is None:
+                ent_reg.async_update_entity(entity.entity_id, new_unique_id=new_uid)
+
+    dev_reg = dr_.async_get(hass)
+    device = dev_reg.async_get_device(identifiers={(DOMAIN, old_base)})
+    if device is not None:
+        dev_reg.async_update_device(device.id, new_identifiers={(DOMAIN, new_base)})
+
+    hass.config_entries.async_update_entry(
+        config_entry, unique_id=new_base, version=2
+    )
+    _LOGGER.info(
+        "Miner '%s' identity migrated to MAC-based ids (%s)",
+        config_entry.title,
+        new_base,
+    )
     return True
 
 
