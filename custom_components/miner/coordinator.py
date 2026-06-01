@@ -25,6 +25,7 @@ from .const import (
     CONF_SSH_USERNAME,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
+    MINER_DETECTION_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1076,8 +1077,11 @@ class MinerCoordinator(DataUpdateCoordinator):
         miner_ip = self.config_entry.data[CONF_IP]
         # Hard timeout: pyasic auto-detection has no internal timeout and can hang
         # indefinitely on a flaky/unreachable miner, blocking setup and the loop.
+        # See MINER_DETECTION_TIMEOUT in const.py for why this isn't tiny.
         try:
-            miner = await asyncio.wait_for(pyasic.get_miner(miner_ip), timeout=15)
+            miner = await asyncio.wait_for(
+                pyasic.get_miner(miner_ip), timeout=MINER_DETECTION_TIMEOUT
+            )
         except (TimeoutError, asyncio.TimeoutError):
             _LOGGER.warning("get_miner timed out for %s - treating as offline", miner_ip)
             return None

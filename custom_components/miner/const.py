@@ -26,5 +26,12 @@ SERVICE_SET_WORK_MODE = "set_work_mode"
 # Python 3.14 requires pydantic patch (applied in patch.py)
 PYASIC_VERSION = "0.78.0"
 
+# Hard timeout (seconds) for pyasic auto-detection (get_miner). pyasic has no
+# internal timeout and can hang indefinitely on a flaky/unreachable miner.
+# A full BOS+ detection legitimately takes 24-30s under load, so this must stay
+# comfortably above that - too small a value spuriously times out valid miners
+# during setup, leaving the config entry stuck in setup_retry.
+MINER_DETECTION_TIMEOUT = 45
+
 TERA_HASH_PER_SECOND = "TH/s"
 JOULES_PER_TERA_HASH = "J/TH"
