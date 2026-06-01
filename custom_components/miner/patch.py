@@ -26,6 +26,7 @@ def install_package(
     constraints: str | None = None,
     timeout: int | None = None,
     force_reinstall: bool = False,
+    no_deps: bool = False,
 ) -> bool:
     """Install a package on PyPi. Accepts pip compatible package strings.
 
@@ -55,6 +56,8 @@ def install_package(
         args.append("--upgrade")
     if force_reinstall:
         args.append("--reinstall")
+    if no_deps:
+        args.append("--no-deps")
     if constraints is not None:
         args += ["--constraint", constraints]
     if target:
