@@ -65,14 +65,14 @@ class AvalonLedLight(CoordinatorEntity[MinerCoordinator], LightEntity):
     @property
     def unique_id(self) -> str | None:
         """Return device UUID."""
-        return f"{self.coordinator.config_entry.entry_id}-led_light"
+        return f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-led_light"
 
     @property
     def device_info(self) -> entity.DeviceInfo:
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],

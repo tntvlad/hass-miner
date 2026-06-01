@@ -312,7 +312,7 @@ class MinerSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-{sensor}"
         self._sensor = sensor
         self.entity_description = entity_description
 
@@ -334,7 +334,7 @@ class MinerSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -367,7 +367,7 @@ class MinerBoardSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-{board_num}-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-{board_num}-{sensor}"
         self._board_num = board_num
         self._sensor = sensor
         self.entity_description = entity_description
@@ -390,7 +390,7 @@ class MinerBoardSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -423,7 +423,7 @@ class MinerFanSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-{fan_num}-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-{fan_num}-{sensor}"
         self._fan_num = fan_num
         self._sensor = sensor
         self.entity_description = entity_description
@@ -447,7 +447,7 @@ class MinerFanSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -479,7 +479,7 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-avalon-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-avalon-{sensor}"
         self._sensor = sensor
         self.entity_description = entity_description
 
@@ -502,7 +502,7 @@ class AvalonSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -534,7 +534,7 @@ class VNishSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-vnish-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-vnish-{sensor}"
         self._sensor = sensor
         self.entity_description = entity_description
 
@@ -557,7 +557,7 @@ class VNishSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -589,7 +589,7 @@ class BOSSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-bos-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-bos-{sensor}"
         self._sensor = sensor
         self.entity_description = entity_description
 
@@ -612,7 +612,7 @@ class BOSSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -644,7 +644,7 @@ class BitAxeSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-bitaxe-{sensor}"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-bitaxe-{sensor}"
         self._sensor = sensor
         self.entity_description = entity_description
 
@@ -667,7 +667,7 @@ class BitAxeSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],

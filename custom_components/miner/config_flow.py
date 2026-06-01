@@ -151,6 +151,22 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         self._miner = miner
+
+        # Anchor the config entry on the miner's MAC so devices/entities survive
+        # re-adds and IP changes instead of being orphaned (see #19). Best-effort:
+        # if the MAC can't be read we fall back to the entry_id-based identity.
+        try:
+            from homeassistant.helpers.device_registry import format_mac
+
+            miner_data = await miner.get_data()
+            mac = getattr(miner_data, "mac", None)
+        except Exception:  # noqa: BLE001 - MAC is best-effort
+            mac = None
+            _LOGGER.debug("Could not read MAC for unique_id", exc_info=True)
+        if mac:
+            await self.async_set_unique_id(format_mac(mac))
+            self._abort_if_unique_id_configured()
+
         self._data.update(user_input)
         return await self.async_step_login()
 

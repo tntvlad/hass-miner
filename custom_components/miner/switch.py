@@ -110,7 +110,7 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-active"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-active"
         self._attr_is_on = self.coordinator.data["is_mining"]
         self.updating_switch = False
         self._last_mining_mode = None
@@ -125,7 +125,7 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             manufacturer=self.coordinator.data["make"],
             model=self.coordinator.data["model"],
@@ -218,7 +218,7 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
     def __init__(self, coordinator: MinerCoordinator) -> None:
         """Initialize the switch."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-avalon-mining"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-avalon-mining"
         # Get initial state from coordinator data, default to True
         asc_enabled = self.coordinator.data.get("avalon_asc_enabled")
         self._attr_is_on = asc_enabled if asc_enabled is not None else True
@@ -234,7 +234,7 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
@@ -343,7 +343,7 @@ class VnishLegacyMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity)
     def __init__(self, coordinator: MinerCoordinator) -> None:
         """Initialize the switch."""
         super().__init__(coordinator=coordinator)
-        self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-vnish-legacy-mining"
+        self._attr_unique_id = f"{(self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id)}-vnish-legacy-mining"
         self._attr_is_on = self.coordinator.data.get("is_mining", True)
         self._updating_switch = False
 
@@ -357,7 +357,7 @@ class VnishLegacyMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity)
         """Return device info."""
         mac = self.coordinator.data.get("mac")
         return entity.DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, (self.coordinator.config_entry.unique_id or self.coordinator.config_entry.entry_id))},
             connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
             configuration_url=f"http://{self.coordinator.data['ip']}",
             manufacturer=self.coordinator.data["make"],
