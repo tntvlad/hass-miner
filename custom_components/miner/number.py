@@ -24,7 +24,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_WEB_PASSWORD, CONF_WEB_USERNAME, DOMAIN
-from .coordinator import MinerCoordinator, _is_vnish_miner, _set_vnish_overclock
+from .coordinator import (
+    MinerCoordinator,
+    _is_bos_miner,
+    _is_vnish_miner,
+    _set_vnish_overclock,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,14 +52,28 @@ async def async_setup_entry(
     """Add sensors for passed config_entry in HA."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
+    # Already first-refreshed in __init__; only refresh if needed, so a transient
+    # get_data failure doesn't abort platform setup and drop the number.
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
+
+    miner = coordinator.miner
+    fw_ver = (coordinator.data or {}).get("fw_ver", "") or ""
 
     # Skip power limit slider for VNish miners — use VNish Preset select instead
     is_vnish = (
-        coordinator.miner.web is not None
-        and type(coordinator.miner.web).__name__ == "VNishWebAPI"
+        miner is not None
+        and miner.web is not None
+        and type(miner.web).__name__ == "VNishWebAPI"
     )
-    if coordinator.miner.supports_autotuning and not is_vnish:
+    # Create the power-limit number for any BOS/Braiins miner regardless of the
+    # per-fetch supports_autotuning flag (intermittently unset by pyasic, which
+    # previously left the number missing after a restart). power_limit_range is
+    # always present in the coordinator data, so the entity is safe to create.
+    is_bos = _is_bos_miner(miner, fw_ver) or (
+        miner is not None and "bos" in str(miner).lower()
+    )
+    if (is_bos or (miner is not None and miner.supports_autotuning)) and not is_vnish:
         async_add_entities(
             [
                 MinerPowerLimitNumber(

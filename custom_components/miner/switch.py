@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AVALON_MODE_FULL, CONF_AVALON_CONTROL_MODE, DOMAIN
-from .coordinator import MinerCoordinator, _is_avalon_nano_miner
+from .coordinator import MinerCoordinator, _is_avalon_nano_miner, _is_bos_miner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,12 +74,26 @@ async def async_setup_entry(
         """Create a sensor entity."""
         created.add(key)
 
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator was already first-refreshed in __init__ before platforms are
+    # forwarded; only refresh here if that somehow hasn't happened, so a transient
+    # get_data failure doesn't abort the whole platform setup (and drop the switch).
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
 
     entities = []
 
-    # Standard miner active switch (uses pyasic)
-    if coordinator.miner.supports_shutdown:
+    # Standard miner active switch (uses pyasic).
+    # Create it for any BOS/Braiins miner regardless of the per-fetch
+    # supports_shutdown flag: pyasic intermittently returns a detection with that
+    # flag unset (esp. under restart load), which previously left the switch
+    # missing and broke every automation referencing it. BOS+ miners always
+    # support pause/resume.
+    miner = coordinator.miner
+    fw_ver = (coordinator.data or {}).get("fw_ver", "") or ""
+    is_bos = _is_bos_miner(miner, fw_ver) or (
+        miner is not None and "bos" in str(miner).lower()
+    )
+    if is_bos or (miner is not None and miner.supports_shutdown):
         entities.append(MinerActiveSwitch(coordinator=coordinator))
 
     # Check if user wants full CGMiner control for Avalon miners
