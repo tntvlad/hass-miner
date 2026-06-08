@@ -1113,19 +1113,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         if miner is None:
             self._failure_count += 1
 
-            if self._failure_count <= 3:
-                _LOGGER.warning(
-                    f"Miner is offline – returning zeroed data (failure {self._failure_count}/3)."
-                )
-                return {
-                    **DEFAULT_DATA,
-                    "power_limit_range": {
-                        "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                        "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
-                    },
-                }
-
-            raise UpdateFailed("Miner Offline (consecutive failure)")
+            # Keep last-known-good data on failure instead of returning zeroed
+            # DEFAULT_DATA (which made sensors flap to 0 on transient hiccups).
+            raise UpdateFailed("Miner offline")
 
         # At this point, miner is valid
         _LOGGER.debug(f"Found miner: {self.miner}")
@@ -1158,38 +1148,12 @@ class MinerCoordinator(DataUpdateCoordinator):
                     miner_data = await self.miner.get_data(include=data_options)
                 except Exception as retry_err:
                     self._failure_count += 1
-                    if self._failure_count <= 3:
-                        _LOGGER.warning(
-                            f"Error fetching miner data: {retry_err} – returning zeroed data (failure {self._failure_count}/3)."
-                        )
-                        return {
-                            **DEFAULT_DATA,
-                            "power_limit_range": {
-                                "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                                "max": self.config_entry.data.get(
-                                    CONF_MAX_POWER, 10000
-                                ),
-                            },
-                        }
-                    _LOGGER.exception(retry_err)
-                    raise UpdateFailed from retry_err
+                    # Keep last-known-good data on transient failure (no fake 0).
+                    raise UpdateFailed(f"Error fetching miner data: {retry_err}") from retry_err
             else:
                 self._failure_count += 1
-
-                if self._failure_count <= 3:
-                    _LOGGER.warning(
-                        f"Error fetching miner data: {err} – returning zeroed data (failure {self._failure_count}/3)."
-                    )
-                    return {
-                        **DEFAULT_DATA,
-                        "power_limit_range": {
-                            "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                            "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
-                        },
-                    }
-
-                _LOGGER.exception(err)
-                raise UpdateFailed from err
+                # Keep last-known-good data on transient failure (no fake 0).
+                raise UpdateFailed(f"Error fetching miner data: {err}") from err
 
         _LOGGER.debug(f"Got data: {miner_data}")
 
