@@ -58,7 +58,7 @@ def _ensure_pyasic():
     except (ImportError, Exception):
         from .patch import install_package
 
-        install_package(f"pyasic=={PYASIC_VERSION}")
+        install_package(f"pyasic=={PYASIC_VERSION}", no_deps=True)
         import pyasic as _pyasic
 
     pyasic = _pyasic

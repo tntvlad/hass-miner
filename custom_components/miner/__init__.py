@@ -66,7 +66,7 @@ def _ensure_pyasic():
     # Need to install/reinstall
     from .patch import install_package
 
-    install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
+    install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True, no_deps=True)
 
     # Clear any cached broken imports
     for mod_name in list(sys.modules.keys()):
