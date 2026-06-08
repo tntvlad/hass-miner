@@ -219,7 +219,7 @@ async def async_setup_entry(
 
     sensors = []
     is_avalon = _is_avalon_nano_miner(coordinator.miner)
-    is_vnish = _is_vnish_miner(coordinator.miner, coordinator.data.get("fw_ver", ""))
+    is_vnish = _is_vnish_miner(coordinator.miner)
     for s in coordinator.data["miner_sensors"]:
         # Only show active_preset_name for Avalon Nano miners (workmode)
         if s == "active_preset_name" and not is_avalon:
@@ -230,7 +230,7 @@ async def async_setup_entry(
     is_bos = _is_bos_miner(coordinator.miner, coordinator.data.get("fw_ver", ""))
     board_sensors = ["board_temperature", "chip_temperature", "board_hashrate"]
     if is_vnish:
-        board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "board_hashrate"]
+        board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "water_inlet_temperature", "water_outlet_temperature", "board_hashrate"]
     elif is_bos:
         board_sensors = ["board_temperature", "inlet_temperature", "outlet_temperature", "chip_temperature", "water_inlet_temperature", "water_outlet_temperature", "board_hashrate"]
 

@@ -378,9 +378,14 @@ async def _fetch_vnish_temperatures(ip: str, password: str = "admin") -> dict | 
                         chip_temp_max = chip_temp_obj.get("max", 0) if isinstance(chip_temp_obj, dict) else 0
                         chip_temp_min = chip_temp_obj.get("min", 0) if isinstance(chip_temp_obj, dict) else 0
 
+                        # Hydro miners expose water cooling temperatures per chain
+                        water_inlet = chain.get("inlet_water_temp")
+                        water_outlet = chain.get("outlet_water_temp")
+
                         _LOGGER.debug(
-                            "VNish %s chain id=%d slot=%d: pcb=%s/%s, chip=%s/%s",
-                            ip, chain_id, slot, pcb_temp_min, pcb_temp_max, chip_temp_min, chip_temp_max
+                            "VNish %s chain id=%d slot=%d: pcb=%s/%s, chip=%s/%s, water=%s/%s",
+                            ip, chain_id, slot, pcb_temp_min, pcb_temp_max, chip_temp_min, chip_temp_max,
+                            water_inlet, water_outlet,
                         )
 
                         result[slot] = {
@@ -388,6 +393,8 @@ async def _fetch_vnish_temperatures(ip: str, password: str = "admin") -> dict | 
                             "board_temperature_min": pcb_temp_min,
                             "chip_temperature": chip_temp_max,
                             "chip_temperature_min": chip_temp_min,
+                            "water_inlet_temperature": water_inlet,
+                            "water_outlet_temperature": water_outlet,
                         }
                     _LOGGER.debug("VNish %s: final temps result: %s", ip, result)
                     return result if result else None
@@ -1341,12 +1348,16 @@ class MinerCoordinator(DataUpdateCoordinator):
                     board_temp_min = temps.get("board_temperature_min", 0)
                     chip_temp = temps.get("chip_temperature", 0)
                     chip_temp_min = temps.get("chip_temperature_min", 0)
+                    water_inlet = temps.get("water_inlet_temperature")
+                    water_outlet = temps.get("water_outlet_temperature")
                     if slot in data["board_sensors"]:
                         # Preserve hashrate from pyasic, replace temps from VNish API
                         data["board_sensors"][slot]["board_temperature"] = board_temp
                         data["board_sensors"][slot]["board_temperature_min"] = board_temp_min
                         data["board_sensors"][slot]["chip_temperature"] = chip_temp
                         data["board_sensors"][slot]["chip_temperature_min"] = chip_temp_min
+                        data["board_sensors"][slot]["water_inlet_temperature"] = water_inlet
+                        data["board_sensors"][slot]["water_outlet_temperature"] = water_outlet
                     else:
                         # Create new board entry with VNish temps
                         data["board_sensors"][slot] = {
@@ -1354,6 +1365,8 @@ class MinerCoordinator(DataUpdateCoordinator):
                             "board_temperature_min": board_temp_min,
                             "chip_temperature": chip_temp,
                             "chip_temperature_min": chip_temp_min,
+                            "water_inlet_temperature": water_inlet,
+                            "water_outlet_temperature": water_outlet,
                             "board_hashrate": 0,
                         }
                 _LOGGER.debug(
