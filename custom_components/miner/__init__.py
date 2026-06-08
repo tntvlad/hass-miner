@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from typing import TYPE_CHECKING
 
@@ -13,7 +14,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 if TYPE_CHECKING:
     from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_IP, DOMAIN, PYASIC_VERSION
+from .const import CONF_IP, DOMAIN, MINER_DETECTION_TIMEOUT, PYASIC_VERSION
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -109,7 +110,13 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     from .services import async_setup_services
 
     miner_ip = config_entry.data[CONF_IP]
-    miner = await pyasic.get_miner(miner_ip)
+    try:
+        # See MINER_DETECTION_TIMEOUT in const.py for why this isn't tiny.
+        miner = await asyncio.wait_for(
+            pyasic.get_miner(miner_ip), timeout=MINER_DETECTION_TIMEOUT
+        )
+    except (TimeoutError, asyncio.TimeoutError) as err:
+        raise ConfigEntryNotReady("Miner detection timed out") from err
 
     if miner is None:
         raise ConfigEntryNotReady("Miner could not be found.")
