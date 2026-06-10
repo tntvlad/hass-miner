@@ -15,6 +15,7 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    AVAILABILITY_FAILURE_THRESHOLD,
     AVALON_MODE_FULL,
     CONF_AVALON_CONTROL_MODE,
     CONF_IP,
@@ -25,7 +26,6 @@ from .const import (
     CONF_SSH_USERNAME,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
-    AVAILABILITY_FAILURE_THRESHOLD,
     MINER_DETECTION_TIMEOUT,
     TRANSIENT_FAILURE_GRACE,
 )
