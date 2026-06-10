@@ -225,10 +225,12 @@ class VNishAPI:
                     self._token = data.get("token")
                     _LOGGER.debug("VNish unlock OK, token=%s", self._token)
                     return bool(self._token)
-                _LOGGER.error("VNish unlock failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish unlock failed: HTTP %s", resp.status)
                 return False
         except Exception as e:
-            _LOGGER.error("VNish unlock error: %s", e)
+            # Connection-level failures are expected while the miner is
+            # powered off (offline setup / energy saving) - keep them quiet.
+            _LOGGER.debug("VNish unlock error: %s", e)
             return False
 
     async def get_presets(self, session: aiohttp.ClientSession) -> list[dict]:
@@ -242,10 +244,11 @@ class VNishAPI:
                 if resp.status == 200:
                     data = await resp.json()
                     return data if isinstance(data, list) else data.get("presets", [])
-                _LOGGER.error("VNish get_presets failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish get_presets failed: HTTP %s", resp.status)
                 return []
         except Exception as e:
-            _LOGGER.error("VNish get_presets error: %s", e)
+            # Quiet on connection failures - expected for a powered-off miner.
+            _LOGGER.debug("VNish get_presets error: %s", e)
             return []
 
     async def get_settings(self, session: aiohttp.ClientSession) -> dict:
@@ -258,10 +261,11 @@ class VNishAPI:
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                _LOGGER.error("VNish get_settings failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish get_settings failed: HTTP %s", resp.status)
                 return {}
         except Exception as e:
-            _LOGGER.error("VNish get_settings error: %s", e)
+            # Quiet on connection failures - expected for a powered-off miner.
+            _LOGGER.debug("VNish get_settings error: %s", e)
             return {}
 
     async def apply_preset(
