@@ -1375,10 +1375,45 @@ class MinerCoordinator(DataUpdateCoordinator):
                     data["board_sensors"],
                 )
             else:
-                _LOGGER.warning(
-                    "VNish %s: temperature fetch failed, using pyasic fallback",
-                    self.miner.ip,
+                # The VNish REST endpoint is the only temperature source for
+                # these miners (pyasic does not deliver VNish board temps -
+                # that's why this fetch exists). On a transient fetch failure,
+                # keep the last known temperatures instead of pushing the
+                # sensors to unknown for one poll cycle, which also spams any
+                # downstream group/template sensors.
+                prev_boards = (self.data or {}).get("board_sensors") or {}
+                temp_keys = (
+                    "board_temperature",
+                    "board_temperature_min",
+                    "chip_temperature",
+                    "chip_temperature_min",
+                    "water_inlet_temperature",
+                    "water_outlet_temperature",
                 )
+                restored = 0
+                for slot, prev_vals in prev_boards.items():
+                    cur = data["board_sensors"].get(slot)
+                    if cur is None:
+                        continue
+                    for key in temp_keys:
+                        # 0 is the VNish placeholder for "no reading", not a
+                        # plausible operating temperature.
+                        if not cur.get(key) and prev_vals.get(key):
+                            cur[key] = prev_vals[key]
+                            restored += 1
+                if restored:
+                    _LOGGER.info(
+                        "VNish %s: temperature fetch failed, keeping %d last "
+                        "known temperature value(s) until the next poll",
+                        self.miner.ip,
+                        restored,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "VNish %s: temperature fetch failed and no previous "
+                        "temperatures to fall back on",
+                        self.miner.ip,
+                    )
 
         # Fetch BOS miner stats and hashboard temps via REST API
         if _is_bos_miner(self.miner, miner_data.fw_ver):
