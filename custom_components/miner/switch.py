@@ -10,6 +10,7 @@ import aiohttp
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -31,7 +32,9 @@ def _is_vnish_legacy_miner(coordinator: MinerCoordinator) -> bool:
     are explicitly excluded to avoid any interference.
     """
     if coordinator.miner is None:
-        return False
+        # Offline setup from cached profile - use the flag captured while
+        # the miner was last online.
+        return bool(coordinator.cached_profile.get("is_vnish_legacy", False))
 
     # CRITICAL: If miner has modern VNishWebAPI, it is NOT legacy - never interfere
     has_modern_api = coordinator.miner.web is not None and type(
@@ -89,18 +92,29 @@ async def async_setup_entry(
     # missing and broke every automation referencing it. BOS+ miners always
     # support pause/resume.
     miner = coordinator.miner
+    offline = miner is None
+    profile = coordinator.cached_profile
     fw_ver = (coordinator.data or {}).get("fw_ver", "") or ""
-    is_bos = _is_bos_miner(miner, fw_ver) or (
-        miner is not None and "bos" in str(miner).lower()
+    is_bos = (
+        _is_bos_miner(miner, fw_ver)
+        or (miner is not None and "bos" in str(miner).lower())
+        or (offline and profile.get("is_bos", False))
     )
-    if is_bos or (miner is not None and miner.supports_shutdown):
+    if (
+        is_bos
+        or (miner is not None and miner.supports_shutdown)
+        or (offline and profile.get("supports_shutdown", False))
+    ):
         entities.append(MinerActiveSwitch(coordinator=coordinator))
 
     # Check if user wants full CGMiner control for Avalon miners
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
 
     # Avalon Nano 3s mining switch (uses CGMiner API) - only in full mode
-    if _is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
+    is_avalon = _is_avalon_nano_miner(miner) or (
+        offline and profile.get("is_avalon", False)
+    )
+    if is_avalon and avalon_mode == AVALON_MODE_FULL:
         entities.append(AvalonMiningSwitch(coordinator=coordinator))
 
     # Legacy VNish 3.x mining switch (uses CGI-bin endpoints)
@@ -150,6 +164,10 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
     async def async_turn_on(self) -> None:
         """Turn on miner."""
         miner = self.coordinator.miner
+        if miner is None:
+            raise HomeAssistantError(
+                f"{self.coordinator.config_entry.title} is offline"
+            )
         _LOGGER.debug(f"{self.coordinator.config_entry.title}: Resume mining.")
         if not miner.supports_shutdown:
             raise TypeError(f"{miner}: Shutdown not supported.")
@@ -179,6 +197,10 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
     async def async_turn_off(self) -> None:
         """Turn off miner."""
         miner = self.coordinator.miner
+        if miner is None:
+            raise HomeAssistantError(
+                f"{self.coordinator.config_entry.title} is offline"
+            )
         _LOGGER.debug(f"{self.coordinator.config_entry.title}: Stop mining.")
         if not miner.supports_shutdown:
             raise TypeError(f"{miner}: Shutdown not supported.")

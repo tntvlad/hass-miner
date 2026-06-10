@@ -19,6 +19,7 @@ from homeassistant.components.sensor import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfPower
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -58,6 +59,8 @@ async def async_setup_entry(
         await coordinator.async_config_entry_first_refresh()
 
     miner = coordinator.miner
+    offline = miner is None
+    profile = coordinator.cached_profile
     fw_ver = (coordinator.data or {}).get("fw_ver", "") or ""
 
     # Skip power limit slider for VNish miners — use VNish Preset select instead
@@ -65,15 +68,21 @@ async def async_setup_entry(
         miner is not None
         and miner.web is not None
         and type(miner.web).__name__ == "VNishWebAPI"
-    )
+    ) or (offline and profile.get("is_vnish", False))
     # Create the power-limit number for any BOS/Braiins miner regardless of the
     # per-fetch supports_autotuning flag (intermittently unset by pyasic, which
     # previously left the number missing after a restart). power_limit_range is
     # always present in the coordinator data, so the entity is safe to create.
-    is_bos = _is_bos_miner(miner, fw_ver) or (
-        miner is not None and "bos" in str(miner).lower()
+    is_bos = (
+        _is_bos_miner(miner, fw_ver)
+        or (miner is not None and "bos" in str(miner).lower())
+        or (offline and profile.get("is_bos", False))
     )
-    if (is_bos or (miner is not None and miner.supports_autotuning)) and not is_vnish:
+    if (
+        is_bos
+        or (miner is not None and miner.supports_autotuning)
+        or (offline and profile.get("supports_autotuning", False))
+    ) and not is_vnish:
         async_add_entities(
             [
                 MinerPowerLimitNumber(
@@ -85,7 +94,9 @@ async def async_setup_entry(
 
     # Add VNish voltage and frequency number entities
     fw_ver = coordinator.data.get("fw_ver", "") or ""
-    if _is_vnish_miner(coordinator.miner, fw_ver):
+    if _is_vnish_miner(coordinator.miner, fw_ver) or (
+        offline and profile.get("is_vnish", False)
+    ):
         async_add_entities(
             [
                 VNishVoltageNumber(coordinator=coordinator),
@@ -229,6 +240,10 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
         import pyasic  # lazy import to avoid blocking event loop
 
         miner = self.coordinator.miner
+        if miner is None:
+            raise HomeAssistantError(
+                f"{self.coordinator.config_entry.title} is offline"
+            )
 
         _LOGGER.debug(
             f"{self.coordinator.config_entry.title}: setting power limit to {value}."

@@ -26,10 +26,16 @@ async def async_setup_entry(
     """Set up Avalon miner buttons from config entry."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator data is primed in __init__ (live first refresh or cached
+    # profile when the miner is powered off); only refresh here if needed.
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
 
     # Only add reboot button for Avalon Nano miners
-    if _is_avalon_nano_miner(coordinator.miner):
+    if _is_avalon_nano_miner(coordinator.miner) or (
+        coordinator.miner is None
+        and coordinator.cached_profile.get("is_avalon", False)
+    ):
         async_add_entities([AvalonRebootButton(coordinator)])
 
 

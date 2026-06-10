@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,15 @@ from homeassistant.exceptions import ConfigEntryNotReady
 if TYPE_CHECKING:
     from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_IP, DOMAIN, MINER_DETECTION_TIMEOUT, PYASIC_VERSION
+from .const import (
+    CONF_CACHED_PROFILE,
+    CONF_IP,
+    DOMAIN,
+    MINER_DETECTION_TIMEOUT,
+    PYASIC_VERSION,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -115,16 +124,32 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         miner = await asyncio.wait_for(
             pyasic.get_miner(miner_ip), timeout=MINER_DETECTION_TIMEOUT
         )
-    except (TimeoutError, asyncio.TimeoutError) as err:
-        raise ConfigEntryNotReady("Miner detection timed out") from err
+    except (TimeoutError, asyncio.TimeoutError):
+        miner = None
 
-    if miner is None:
+    if miner is None and not config_entry.data.get(CONF_CACHED_PROFILE):
+        # Never seen this miner successfully -> nothing to build entities
+        # from; keep the classic retry behaviour.
         raise ConfigEntryNotReady("Miner could not be found.")
 
     m_coordinator = MinerCoordinator(hass, config_entry)
     hass.data.setdefault(DOMAIN, {})[config_entry.entry_id] = m_coordinator
 
-    await m_coordinator.async_config_entry_first_refresh()
+    if miner is None:
+        # Miner is unreachable (typically powered off to save energy) but we
+        # have a cached device profile from an earlier successful update: set
+        # up from that instead of failing with ConfigEntryNotReady, which
+        # showed the integration as broken ("retrying setup") for as long as
+        # the miner stayed off. Entities are created unavailable and recover
+        # automatically once the miner is powered on again.
+        _LOGGER.info(
+            "Miner %s is unreachable; setting up from the cached device "
+            "profile - entities stay unavailable until the miner returns",
+            miner_ip,
+        )
+        m_coordinator.prime_from_cached_profile()
+    else:
+        await m_coordinator.async_config_entry_first_refresh()
 
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 

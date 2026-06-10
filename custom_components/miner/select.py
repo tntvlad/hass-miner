@@ -187,7 +187,11 @@ def is_avalon_nano_miner(miner) -> bool:
 def is_vnish_miner(coordinator: MinerCoordinator) -> bool:
     """Check if miner is running VNish firmware."""
     miner = coordinator.miner
-    if miner is None or miner.web is None:
+    if miner is None:
+        # Offline setup from cached profile - use the flag captured while
+        # the miner was last online.
+        return bool(coordinator.cached_profile.get("is_vnish", False))
+    if miner.web is None:
         return False
     return type(miner.web).__name__ == "VNishWebAPI"
 
@@ -380,7 +384,10 @@ async def async_setup_entry(
     """Add select entities for passed config_entry in HA."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator data is primed in __init__ (live first refresh or cached
+    # profile when the miner is powered off); only refresh here if needed.
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
 
     entities = []
 
@@ -388,7 +395,11 @@ async def async_setup_entry(
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
 
     # Add workmode and LED effect select for Avalon Nano miners (only in full mode)
-    if is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
+    is_avalon = is_avalon_nano_miner(coordinator.miner) or (
+        coordinator.miner is None
+        and coordinator.cached_profile.get("is_avalon", False)
+    )
+    if is_avalon and avalon_mode == AVALON_MODE_FULL:
         _LOGGER.info(
             "Detected Avalon Nano miner at %s, adding workmode and LED controls (full mode)",
             coordinator.data.get("ip"),
