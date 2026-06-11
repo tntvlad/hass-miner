@@ -29,6 +29,7 @@ from .coordinator import (
     _is_bos_miner,
     _is_vnish_miner,
     _set_vnish_overclock,
+    _set_vnish_throttle,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ async def async_setup_entry(
             [
                 VNishVoltageNumber(coordinator=coordinator),
                 VNishFrequencyNumber(coordinator=coordinator),
+                VNishThrottleNumber(coordinator=coordinator),
             ]
         )
 
@@ -711,6 +713,61 @@ class VNishFrequencyNumber(_VNishOverclockBase):
         if not success:
             _LOGGER.error(
                 "%s: failed to set VNish frequency to %s MHz",
+                self.coordinator.config_entry.title, value
+            )
+        await self.coordinator.async_request_refresh()
+
+
+class VNishThrottleNumber(_VNishOverclockBase):
+    """Number entity for the VNish mining throttle (percent of full power).
+
+    VNish >= 1.3.3 can throttle the miner like a dimmer (issue #20): e.g. 50%
+    roughly halves hashrate/power draw without stopping the miner - useful for
+    surplus-PV power management or using the miner as an adjustable heater.
+    """
+
+    _data_key = "vnish_throttle"
+    # min/max are fixed by the firmware's supported throttle range, not
+    # delivered via the API like the overclock limits.
+    _min_key = "vnish_throttle_min"
+    _max_key = "vnish_throttle_max"
+    _default_min = 20
+    _default_max = 100
+
+    @property
+    def name(self) -> str:
+        """Return entity name."""
+        return f"{self.coordinator.config_entry.title} Throttle"
+
+    @property
+    def unique_id(self) -> str:
+        """Return unique entity id."""
+        return f"{self.coordinator.config_entry.entry_id}-vnish-throttle"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return unit of measurement."""
+        return "%"
+
+    @property
+    def native_step(self) -> float:
+        """Return step size."""
+        return 1
+
+    @property
+    def icon(self) -> str:
+        """Return icon."""
+        return "mdi:car-speed-limiter"
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set a new throttle level."""
+        password = self._get_password()
+        success = await _set_vnish_throttle(
+            self.coordinator.data["ip"], percent=int(value), password=password
+        )
+        if not success:
+            _LOGGER.error(
+                "%s: failed to set VNish throttle to %s%%",
                 self.coordinator.config_entry.title, value
             )
         await self.coordinator.async_request_refresh()
