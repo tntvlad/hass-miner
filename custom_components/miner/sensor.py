@@ -215,11 +215,24 @@ async def async_setup_entry(
             entity_description=description,
         )
 
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator data is primed in __init__ (live first refresh or cached
+    # profile when the miner is powered off); only refresh here if that
+    # somehow hasn't happened.
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
+
+    # When the miner is offline (set up from the cached profile), the live
+    # miner object is None - fall back to the cached firmware-type flags and
+    # capabilities so the same entity set is created as when it is online.
+    miner = coordinator.miner
+    offline = miner is None
+    profile = coordinator.cached_profile
 
     sensors = []
-    is_avalon = _is_avalon_nano_miner(coordinator.miner)
-    is_vnish = _is_vnish_miner(coordinator.miner)
+    is_avalon = _is_avalon_nano_miner(miner) or (
+        offline and profile.get("is_avalon", False)
+    )
+    is_vnish = _is_vnish_miner(miner) or (offline and profile.get("is_vnish", False))
     for s in coordinator.data["miner_sensors"]:
         # Only show active_preset_name for Avalon Nano miners (workmode)
         if s == "active_preset_name" and not is_avalon:
@@ -227,25 +240,35 @@ async def async_setup_entry(
         sensors.append(_create_miner_entity(s))
 
     # Build board sensor list - min temps for VNish, inlet/outlet for BOS
-    is_bos = _is_bos_miner(coordinator.miner, coordinator.data.get("fw_ver", ""))
+    is_bos = _is_bos_miner(miner, coordinator.data.get("fw_ver", "")) or (
+        offline and profile.get("is_bos", False)
+    )
     board_sensors = ["board_temperature", "chip_temperature", "board_hashrate"]
     if is_vnish:
         board_sensors = ["board_temperature", "board_temperature_min", "chip_temperature", "chip_temperature_min", "water_inlet_temperature", "water_outlet_temperature", "board_hashrate"]
     elif is_bos:
         board_sensors = ["board_temperature", "inlet_temperature", "outlet_temperature", "chip_temperature", "water_inlet_temperature", "water_outlet_temperature", "board_hashrate"]
 
-    for board in range(coordinator.miner.expected_hashboards or 3):
+    expected_hashboards = (
+        miner.expected_hashboards if miner is not None
+        else profile.get("expected_hashboards")
+    )
+    for board in range(expected_hashboards or 3):
         for s in board_sensors:
             sensors.append(_create_board_entity(board, s))
     model_name = coordinator.data.get("model", "") or ""
     is_hydro = "hyd" in model_name.lower()
     if not is_hydro:
-        for fan in range(coordinator.miner.expected_fans or len(coordinator.data.get("fan_sensors", {})) or 2):
+        expected_fans = (
+            miner.expected_fans if miner is not None
+            else (profile.get("expected_fans") or profile.get("fan_count"))
+        )
+        for fan in range(expected_fans or len(coordinator.data.get("fan_sensors", {})) or 2):
             for s in ["fan_speed"]:
                 sensors.append(_create_fan_entity(fan, s))
 
     # Add Avalon-specific sensors (Best Share, Found Blocks)
-    if _is_avalon_nano_miner(coordinator.miner):
+    if is_avalon:
         for sensor_key in ["best_share", "found_blocks"]:
             description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
             if description:
@@ -258,7 +281,7 @@ async def async_setup_entry(
                 )
 
     # Add VNish-specific sensors (Best Share, Found Blocks)
-    if _is_vnish_miner(coordinator.miner):
+    if is_vnish:
         for sensor_key in ["best_share", "found_blocks"]:
             description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
             if description:
@@ -271,7 +294,7 @@ async def async_setup_entry(
                 )
 
     # Add BOS-specific sensors (Best Share, Found Blocks)
-    if _is_bos_miner(coordinator.miner, coordinator.data.get("fw_ver", "")):
+    if is_bos:
         for sensor_key in ["best_share", "found_blocks"]:
             description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
             if description:
@@ -284,7 +307,7 @@ async def async_setup_entry(
                 )
 
     # Add BitAxe-specific sensors (Best Share, Found Blocks)
-    if _is_bitaxe_miner(coordinator.miner):
+    if _is_bitaxe_miner(miner) or (offline and profile.get("is_bitaxe", False)):
         for sensor_key in ["best_share", "found_blocks"]:
             description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
             if description:

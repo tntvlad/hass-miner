@@ -187,7 +187,11 @@ def is_avalon_nano_miner(miner) -> bool:
 def is_vnish_miner(coordinator: MinerCoordinator) -> bool:
     """Check if miner is running VNish firmware."""
     miner = coordinator.miner
-    if miner is None or miner.web is None:
+    if miner is None:
+        # Offline setup from cached profile - use the flag captured while
+        # the miner was last online.
+        return bool(coordinator.cached_profile.get("is_vnish", False))
+    if miner.web is None:
         return False
     return type(miner.web).__name__ == "VNishWebAPI"
 
@@ -221,10 +225,12 @@ class VNishAPI:
                     self._token = data.get("token")
                     _LOGGER.debug("VNish unlock OK, token=%s", self._token)
                     return bool(self._token)
-                _LOGGER.error("VNish unlock failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish unlock failed: HTTP %s", resp.status)
                 return False
         except Exception as e:
-            _LOGGER.error("VNish unlock error: %s", e)
+            # Connection-level failures are expected while the miner is
+            # powered off (offline setup / energy saving) - keep them quiet.
+            _LOGGER.debug("VNish unlock error: %s", e)
             return False
 
     async def get_presets(self, session: aiohttp.ClientSession) -> list[dict]:
@@ -238,10 +244,11 @@ class VNishAPI:
                 if resp.status == 200:
                     data = await resp.json()
                     return data if isinstance(data, list) else data.get("presets", [])
-                _LOGGER.error("VNish get_presets failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish get_presets failed: HTTP %s", resp.status)
                 return []
         except Exception as e:
-            _LOGGER.error("VNish get_presets error: %s", e)
+            # Quiet on connection failures - expected for a powered-off miner.
+            _LOGGER.debug("VNish get_presets error: %s", e)
             return []
 
     async def get_settings(self, session: aiohttp.ClientSession) -> dict:
@@ -254,10 +261,11 @@ class VNishAPI:
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                _LOGGER.error("VNish get_settings failed: HTTP %s", resp.status)
+                _LOGGER.warning("VNish get_settings failed: HTTP %s", resp.status)
                 return {}
         except Exception as e:
-            _LOGGER.error("VNish get_settings error: %s", e)
+            # Quiet on connection failures - expected for a powered-off miner.
+            _LOGGER.debug("VNish get_settings error: %s", e)
             return {}
 
     async def apply_preset(
@@ -380,7 +388,10 @@ async def async_setup_entry(
     """Add select entities for passed config_entry in HA."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator data is primed in __init__ (live first refresh or cached
+    # profile when the miner is powered off); only refresh here if needed.
+    if coordinator.data is None:
+        await coordinator.async_config_entry_first_refresh()
 
     entities = []
 
@@ -388,7 +399,11 @@ async def async_setup_entry(
     avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
 
     # Add workmode and LED effect select for Avalon Nano miners (only in full mode)
-    if is_avalon_nano_miner(coordinator.miner) and avalon_mode == AVALON_MODE_FULL:
+    is_avalon = is_avalon_nano_miner(coordinator.miner) or (
+        coordinator.miner is None
+        and coordinator.cached_profile.get("is_avalon", False)
+    )
+    if is_avalon and avalon_mode == AVALON_MODE_FULL:
         _LOGGER.info(
             "Detected Avalon Nano miner at %s, adding workmode and LED controls (full mode)",
             coordinator.data.get("ip"),

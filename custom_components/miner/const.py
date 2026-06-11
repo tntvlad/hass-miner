@@ -13,6 +13,12 @@ CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 
+# Config-entry data key for the device profile captured on the last successful
+# update (identity, capabilities, firmware-type flags). Lets the integration
+# set up while the miner is powered off (e.g. for energy saving) instead of
+# failing with ConfigEntryNotReady and showing as broken until it returns.
+CONF_CACHED_PROFILE = "cached_device_profile"
+
 # Avalon control mode options
 AVALON_MODE_SIMPLE = "simple"  # Native pyasic only
 AVALON_MODE_FULL = "full"  # Full CGMiner API control (workmode, LED, mining switch)

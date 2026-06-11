@@ -1,6 +1,7 @@
 """Miner DataUpdateCoordinator."""
 
 import asyncio
+import copy
 import logging
 import re
 from datetime import timedelta
@@ -18,6 +19,7 @@ from .const import (
     AVAILABILITY_FAILURE_THRESHOLD,
     AVALON_MODE_FULL,
     CONF_AVALON_CONTROL_MODE,
+    CONF_CACHED_PROFILE,
     CONF_IP,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
@@ -1055,6 +1057,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         """Initialize MinerCoordinator object."""
         self.miner = None
         self._failure_count = 0
+        # True while running on cached-profile data because the miner was
+        # unreachable during setup; cleared on the first successful update.
+        self._primed_offline = False
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -1103,6 +1108,87 @@ class MinerCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(message) from err
         raise UpdateFailed(message)
 
+    @property
+    def cached_profile(self) -> dict:
+        """Device profile captured on the last successful update (may be {})."""
+        return self.config_entry.data.get(CONF_CACHED_PROFILE) or {}
+
+    def prime_from_cached_profile(self) -> None:
+        """Populate coordinator data from the cached device profile.
+
+        Used when the miner cannot be detected during setup (typically
+        powered off to save energy): entities are created from the cached
+        identity and report unavailable (self.miner is None) until the miner
+        returns; detection is retried on every poll via get_miner().
+        """
+        profile = self.cached_profile
+        data = copy.deepcopy(DEFAULT_DATA)
+        data["hostname"] = profile.get("hostname")
+        data["mac"] = profile.get("mac")
+        data["make"] = profile.get("make")
+        data["model"] = profile.get("model")
+        data["fw_ver"] = profile.get("fw_ver")
+        data["ip"] = self.config_entry.data.get(CONF_IP)
+        data["power_limit_range"] = {
+            "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
+            "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
+        }
+        self.data = data
+        self._primed_offline = True
+
+    def _persist_device_profile(self, data) -> None:
+        """Store the device profile in the config entry (only when changed)."""
+        try:
+            miner = self.miner
+            fw_ver = str(data.get("fw_ver") or "")
+            fw_lower = fw_ver.lower()
+            model_lower = str(data.get("model") or "").lower()
+            has_modern_vnish_api = (
+                miner is not None
+                and miner.web is not None
+                and type(miner.web).__name__ == "VNishWebAPI"
+            )
+            profile = {
+                "hostname": data.get("hostname"),
+                "mac": data.get("mac"),
+                "make": data.get("make"),
+                "model": data.get("model"),
+                "fw_ver": data.get("fw_ver"),
+                "is_vnish": _is_vnish_miner(miner, fw_ver),
+                "is_bos": _is_bos_miner(miner, fw_ver),
+                "is_avalon": _is_avalon_nano_miner(miner),
+                "is_bitaxe": _is_bitaxe_miner(miner),
+                # Mirrors switch._is_vnish_legacy_miner (CGI-bin based VNish 3.x)
+                "is_vnish_legacy": (
+                    not has_modern_vnish_api
+                    and (
+                        "vnish 3" in fw_lower
+                        or "vnish-3" in fw_lower
+                        or "s9d" in model_lower
+                        or "s9 dual" in model_lower
+                    )
+                ),
+                "expected_hashboards": getattr(miner, "expected_hashboards", None),
+                "expected_fans": getattr(miner, "expected_fans", None),
+                "fan_count": len(data.get("fan_sensors") or {}),
+                "supports_shutdown": bool(getattr(miner, "supports_shutdown", False)),
+                "supports_autotuning": bool(
+                    getattr(miner, "supports_autotuning", False)
+                ),
+                # VNish >= 1.3.3 reports a throttle level (vnish_throttle is
+                # populated by the throttle feature branch; None/absent on
+                # older firmware) - lets the throttle entity be re-created
+                # after an offline setup.
+                "has_throttle": data.get("vnish_throttle") is not None,
+            }
+            if profile != self.config_entry.data.get(CONF_CACHED_PROFILE):
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, CONF_CACHED_PROFILE: profile},
+                )
+        except Exception as err:  # profile caching must never break an update
+            _LOGGER.debug("Could not persist device profile: %s", err)
+
     async def get_miner(self):
         """Get a valid Miner instance."""
         import pyasic  # lazy import to avoid blocking event loop
@@ -1149,6 +1235,18 @@ class MinerCoordinator(DataUpdateCoordinator):
         miner = await self.get_miner()
 
         if miner is None:
+            if self._primed_offline:
+                # Set up from the cached profile while the miner is powered
+                # off: this state is expected, so stay quiet (no ERROR per
+                # poll) - entities already report unavailable via the
+                # available property (self.miner is None). Detection is
+                # retried by get_miner() on every poll.
+                _LOGGER.debug(
+                    "%s: miner still offline, waiting for it to return",
+                    self.name,
+                )
+                return self.data
+
             # Keep last-known-good data on failure instead of returning zeroed
             # DEFAULT_DATA (which made sensors flap to 0 on transient hiccups).
             return self._keep_last_or_fail("Miner offline")
@@ -1195,8 +1293,9 @@ class MinerCoordinator(DataUpdateCoordinator):
 
         _LOGGER.debug(f"Got data: {miner_data}")
 
-        # Success: reset the failure count
+        # Success: reset the failure count and leave primed-offline mode
         self._failure_count = 0
+        self._primed_offline = False
 
         def normalize_hashrate_to_th(value):
             """Normalize hashrate to TH/s.
@@ -1495,5 +1594,9 @@ class MinerCoordinator(DataUpdateCoordinator):
             if bitaxe_summary:
                 data["bitaxe_best_share"] = bitaxe_summary.get("best_share")
                 data["bitaxe_found_blocks"] = bitaxe_summary.get("found_blocks")
+
+        # Cache identity/capabilities so the next setup can succeed while the
+        # miner is powered off (see prime_from_cached_profile).
+        self._persist_device_profile(data)
 
         return data
