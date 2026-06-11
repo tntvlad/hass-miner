@@ -65,6 +65,8 @@ DEFAULT_DATA = {
     "vnish_preset": None,
     "vnish_best_share": None,
     "vnish_found_blocks": None,
+    "vnish_throttle": None,
+    "vnish_miner_state": None,
     "vnish_voltage": None,
     "vnish_freq": None,
     "vnish_min_voltage": None,
@@ -304,6 +306,14 @@ async def _fetch_vnish_summary(ip: str, password: str = "admin") -> dict | None:
                         result["best_share"] = int(miner_data["best_share"])
                     if "found_blocks" in miner_data:
                         result["found_blocks"] = int(miner_data["found_blocks"])
+                    # VNish >= 1.3.3: miner_status carries the throttle level
+                    # (percent of full power, e.g. 100 = unthrottled) and the
+                    # miner state (mining/paused/stopped/...).
+                    status = miner_data.get("miner_status") or {}
+                    if "throttled" in status:
+                        result["throttled"] = status.get("throttled")
+                    if "miner_state" in status:
+                        result["miner_state"] = status.get("miner_state")
                 return result if result else None
     except Exception as e:
         _LOGGER.debug("Failed to fetch VNish summary: %s", e)
@@ -546,6 +556,53 @@ async def _set_vnish_overclock(
                 return success
     except Exception as e:
         _LOGGER.debug("VNish %s: failed to set overclock: %s", ip, e)
+    return False
+
+
+async def _set_vnish_throttle(ip: str, percent: int, password: str = "admin") -> bool:
+    """Set the mining throttle level on a VNish miner (VNish >= 1.3.3).
+
+    percent is the target power level in percent of full power (e.g. 50 cuts
+    hashrate roughly in half without stopping the miner). Endpoint and payload
+    match what the VNish web UI itself calls (POST /mining/throttle with
+    {"percent": N}); verified live against an S19 Pro Hydro on VNish 1.3.3.
+    """
+    import aiohttp
+
+    base_url = f"http://{ip}/api/v1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/unlock",
+                json={"pw": password},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("VNish %s: unlock failed: %s", ip, resp.status)
+                    return False
+                token = (await resp.json()).get("token")
+                if not token:
+                    return False
+
+            async with session.post(
+                f"{base_url}/mining/throttle",
+                headers={"Authorization": token},
+                json={"percent": int(percent)},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                success = resp.status == 200
+                _LOGGER.debug(
+                    "VNish %s: POST /mining/throttle percent=%s status=%s",
+                    ip, percent, resp.status,
+                )
+                if not success:
+                    _LOGGER.warning(
+                        "VNish %s: throttle to %s%% failed (HTTP %s)",
+                        ip, percent, resp.status,
+                    )
+                return success
+    except Exception as e:
+        _LOGGER.debug("VNish %s: failed to set throttle: %s", ip, e)
     return False
 
 
@@ -1392,6 +1449,8 @@ class MinerCoordinator(DataUpdateCoordinator):
             "vnish_preset": None,
             "vnish_best_share": None,
             "vnish_found_blocks": None,
+            "vnish_throttle": None,
+            "vnish_miner_state": None,
             "vnish_voltage": None,
             "vnish_freq": None,
             "vnish_min_voltage": None,
@@ -1448,6 +1507,8 @@ class MinerCoordinator(DataUpdateCoordinator):
             if vnish_summary:
                 data["vnish_best_share"] = vnish_summary.get("best_share")
                 data["vnish_found_blocks"] = vnish_summary.get("found_blocks")
+                data["vnish_throttle"] = vnish_summary.get("throttled")
+                data["vnish_miner_state"] = vnish_summary.get("miner_state")
 
             # Fetch VNish overclock limits (no auth required)
             vnish_limits = await _fetch_vnish_overclock_limits(self.miner.ip)
