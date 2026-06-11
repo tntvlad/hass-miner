@@ -559,8 +559,9 @@ async def _set_vnish_throttle(ip: str, percent: int, password: str = "admin") ->
     """Set the mining throttle level on a VNish miner (VNish >= 1.3.3).
 
     percent is the target power level in percent of full power (e.g. 50 cuts
-    hashrate roughly in half without stopping the miner). Follows the
-    mining/* command family (pause/resume/stop/start).
+    hashrate roughly in half without stopping the miner). Endpoint and payload
+    match what the VNish web UI itself calls (POST /mining/throttle with
+    {"percent": N}); verified live against an S19 Pro Hydro on VNish 1.3.3.
     """
     import aiohttp
 
