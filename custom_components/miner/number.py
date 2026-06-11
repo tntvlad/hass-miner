@@ -87,13 +87,20 @@ async def async_setup_entry(
     # Add VNish voltage and frequency number entities
     fw_ver = coordinator.data.get("fw_ver", "") or ""
     if _is_vnish_miner(coordinator.miner, fw_ver):
-        async_add_entities(
-            [
-                VNishVoltageNumber(coordinator=coordinator),
-                VNishFrequencyNumber(coordinator=coordinator),
-                VNishThrottleNumber(coordinator=coordinator),
-            ]
-        )
+        vnish_entities = [
+            VNishVoltageNumber(coordinator=coordinator),
+            VNishFrequencyNumber(coordinator=coordinator),
+        ]
+        # The throttle command only exists on newer VNish firmware (>= 1.3.3).
+        # Only create the entity when the firmware actually reports a throttle
+        # level (or the cached device profile recorded one while the miner was
+        # last online), instead of leaving a permanently unavailable control
+        # on older firmware.
+        if (coordinator.data or {}).get("vnish_throttle") is not None or getattr(
+            coordinator, "cached_profile", {}
+        ).get("has_throttle", False):
+            vnish_entities.append(VNishThrottleNumber(coordinator=coordinator))
+        async_add_entities(vnish_entities)
 
 
 class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
