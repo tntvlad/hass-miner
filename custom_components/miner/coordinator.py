@@ -1144,6 +1144,11 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "supports_autotuning": bool(
                     getattr(miner, "supports_autotuning", False)
                 ),
+                # VNish >= 1.3.3 reports a throttle level (vnish_throttle is
+                # populated by the throttle feature branch; None/absent on
+                # older firmware) - lets the throttle entity be re-created
+                # after an offline setup.
+                "has_throttle": data.get("vnish_throttle") is not None,
             }
             if profile != self.config_entry.data.get(CONF_CACHED_PROFILE):
                 self.hass.config_entries.async_update_entry(
