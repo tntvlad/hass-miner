@@ -15,6 +15,7 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    AVAILABILITY_FAILURE_THRESHOLD,
     AVALON_MODE_FULL,
     CONF_AVALON_CONTROL_MODE,
     CONF_IP,
@@ -26,6 +27,7 @@ from .const import (
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     MINER_DETECTION_TIMEOUT,
+    TRANSIENT_FAILURE_GRACE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1070,7 +1072,36 @@ class MinerCoordinator(DataUpdateCoordinator):
     @property
     def available(self):
         """Return if device is available or not."""
-        return self.miner is not None
+        # Never detected (yet) -> unavailable. After detection the miner object
+        # is cached (detect-once), so reachability has to come from the update
+        # results instead: tolerate a short failure streak, then report
+        # unavailable on sustained failures (e.g. miner powered off at the
+        # wall) rather than keeping entities alive with frozen data forever.
+        if self.miner is None:
+            return False
+        return self._failure_count <= AVAILABILITY_FAILURE_THRESHOLD
+
+    def _keep_last_or_fail(self, message: str, err: Exception | None = None):
+        """Handle a failed poll: absorb short hiccups, raise on streaks.
+
+        The first TRANSIENT_FAILURE_GRACE consecutive failures return the
+        last-known-good data (DEBUG only), so one flaky poll doesn't produce
+        an ERROR log line and a state flap. Anything longer raises
+        UpdateFailed and goes through the standard coordinator handling.
+        """
+        self._failure_count += 1
+        if self.data and self._failure_count <= TRANSIENT_FAILURE_GRACE:
+            _LOGGER.debug(
+                "Update for %s failed (consecutive failure %d, within grace), "
+                "keeping last data: %s",
+                self.name,
+                self._failure_count,
+                message,
+            )
+            return self.data
+        if err is not None:
+            raise UpdateFailed(message) from err
+        raise UpdateFailed(message)
 
     async def get_miner(self):
         """Get a valid Miner instance."""
@@ -1118,11 +1149,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         miner = await self.get_miner()
 
         if miner is None:
-            self._failure_count += 1
-
             # Keep last-known-good data on failure instead of returning zeroed
             # DEFAULT_DATA (which made sensors flap to 0 on transient hiccups).
-            raise UpdateFailed("Miner offline")
+            return self._keep_last_or_fail("Miner offline")
 
         # At this point, miner is valid
         _LOGGER.debug(f"Found miner: {self.miner}")
@@ -1154,13 +1183,15 @@ class MinerCoordinator(DataUpdateCoordinator):
                 try:
                     miner_data = await self.miner.get_data(include=data_options)
                 except Exception as retry_err:
-                    self._failure_count += 1
                     # Keep last-known-good data on transient failure (no fake 0).
-                    raise UpdateFailed(f"Error fetching miner data: {retry_err}") from retry_err
+                    return self._keep_last_or_fail(
+                        f"Error fetching miner data: {retry_err}", retry_err
+                    )
             else:
-                self._failure_count += 1
                 # Keep last-known-good data on transient failure (no fake 0).
-                raise UpdateFailed(f"Error fetching miner data: {err}") from err
+                return self._keep_last_or_fail(
+                    f"Error fetching miner data: {err}", err
+                )
 
         _LOGGER.debug(f"Got data: {miner_data}")
 
