@@ -39,5 +39,18 @@ PYASIC_VERSION = "0.78.12"
 # during setup, leaving the config entry stuck in setup_retry.
 MINER_DETECTION_TIMEOUT = 45
 
+# Number of consecutive update failures absorbed by returning last-known-good
+# data before UpdateFailed is raised. One flaky poll (transient API/HTTP error
+# while the miner is actually fine) then produces a DEBUG line instead of an
+# ERROR + entity flap; a real outage raises on the next poll, ~60s later.
+TRANSIENT_FAILURE_GRACE = 1
+
+# Consecutive update failures after which entities are reported unavailable.
+# The detected-miner object is cached (detect-once), so without this threshold
+# entities would stay available with frozen last-known data forever when a
+# miner is hard powered off at runtime. 3 failures at the 60s update interval
+# ≈ 4 minutes until the device shows as unavailable.
+AVAILABILITY_FAILURE_THRESHOLD = 3
+
 TERA_HASH_PER_SECOND = "TH/s"
 JOULES_PER_TERA_HASH = "J/TH"
