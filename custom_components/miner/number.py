@@ -751,8 +751,13 @@ class VNishThrottleNumber(_VNishOverclockBase):
 
     @property
     def native_step(self) -> float:
-        """Return step size."""
-        return 1
+        """Return step size.
+
+        5%-steps keep the slider pleasant to use; the step only constrains
+        the UI - service calls (automations/power managers) can still set
+        any integer percent within the 20-100 range.
+        """
+        return 5
 
     @property
     def icon(self) -> str:
