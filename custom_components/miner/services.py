@@ -31,11 +31,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         miner_ids = call.data[CONF_DEVICE_ID]
 
         if not miner_ids:
-            return
+            return []
 
         registry = async_get_device_registry(hass)
 
-        return await asyncio.gather(
+        miners = await asyncio.gather(
             *(
                 [
                     hass_devices[registry.async_get(d).primary_config_entry].get_miner()
@@ -43,6 +43,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 ]
             )
         )
+        # get_miner() returns None for an unreachable/powered-off miner
+        # (e.g. an entry set up from the cached profile) - skip those.
+        return [m for m in miners if m is not None]
 
     async def reboot(call: ServiceCall) -> None:
         miners = await get_miners(call)
