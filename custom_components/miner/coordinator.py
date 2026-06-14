@@ -1117,8 +1117,6 @@ class MinerCoordinator(DataUpdateCoordinator):
         # True while running on cached-profile data because the miner was
         # unreachable during setup; cleared on the first successful update.
         self._primed_offline = False
-        # True only after a successful live poll; False on init and while offline.
-        self._miner_responding: bool = False
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -1144,11 +1142,6 @@ class MinerCoordinator(DataUpdateCoordinator):
         if self.miner is None:
             return False
         return self._failure_count <= AVAILABILITY_FAILURE_THRESHOLD
-
-    @property
-    def miner_responding(self) -> bool:
-        """True only after a successful live poll; False on init and while offline."""
-        return self._miner_responding
 
     def _keep_last_or_fail(self, message: str, err: Exception | None = None):
         """Handle a failed poll: absorb short hiccups, raise on streaks.
@@ -1299,7 +1292,6 @@ class MinerCoordinator(DataUpdateCoordinator):
         miner = await self.get_miner()
 
         if miner is None:
-            self._miner_responding = False
             if self._primed_offline:
                 # Set up from the cached profile while the miner is powered
                 # off: this state is expected, so stay quiet (no ERROR per
@@ -1361,7 +1353,6 @@ class MinerCoordinator(DataUpdateCoordinator):
         # Success: reset the failure count and leave primed-offline mode
         self._failure_count = 0
         self._primed_offline = False
-        self._miner_responding = True
 
         def normalize_hashrate_to_th(value):
             """Normalize hashrate to TH/s.

@@ -766,16 +766,19 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Update local state when coordinator data changes."""
+        if (
+            not self._preset_map
+            and not self._fetch_in_progress
+            and self.coordinator.available
+            and self.hass is not None
+        ):
+            self.hass.async_create_task(self._fetch_presets())
         vnish_preset = self.coordinator.data.get("vnish_preset")
         if vnish_preset and self._preset_map:
             for pretty, name in self._preset_map.items():
                 if name == vnish_preset:
                     self._current_preset = pretty
                     break
-        elif not self._preset_map and not self._fetch_in_progress and self.coordinator.miner_responding:
-            # Preset list not yet populated (e.g. miner was offline at startup);
-            # retry now that the coordinator has a live response.
-            self.hass.async_create_task(self._fetch_presets())
         super()._handle_coordinator_update()
 
     @property
