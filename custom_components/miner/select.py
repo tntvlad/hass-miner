@@ -631,6 +631,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         self._presets: list[dict] = []
         self._preset_map: dict[str, str] = {}  # pretty -> name
         self._current_preset: str | None = None
+        self._fetch_in_progress: bool = False
 
     @property
     def name(self) -> str | None:
@@ -728,31 +729,37 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
     async def _fetch_presets(self) -> None:
         """Fetch available presets from VNish API."""
-        async with aiohttp.ClientSession() as session:
-            if not await self._api.unlock(session):
-                return
+        self._fetch_in_progress = True
+        try:
+            async with aiohttp.ClientSession() as session:
+                if not await self._api.unlock(session):
+                    return
 
-            presets = await self._api.get_presets(session)
-            if not presets:
-                return
+                presets = await self._api.get_presets(session)
+                if not presets:
+                    return
 
-            self._presets = presets
-            self._preset_map = {}
-            for p in presets:
-                pretty = p.get("pretty", p.get("name", "unknown"))
-                name = p.get("name", "unknown")
-                self._preset_map[pretty] = name
+                self._presets = presets
+                self._preset_map = {}
+                # Always include "disabled" so the user can switch back to it
+                self._preset_map["disabled"] = "disabled"
+                for p in presets:
+                    pretty = p.get("pretty", p.get("name", "unknown"))
+                    name = p.get("name", "unknown")
+                    self._preset_map[pretty] = name
 
-            settings = await self._api.get_settings(session)
-            if settings:
-                current_name = (
-                    settings.get("miner", {}).get("overclock", {}).get("preset")
-                )
-                if current_name:
-                    for pretty, name in self._preset_map.items():
-                        if name == current_name:
-                            self._current_preset = pretty
-                            break
+                settings = await self._api.get_settings(session)
+                if settings:
+                    current_name = (
+                        settings.get("miner", {}).get("overclock", {}).get("preset")
+                    )
+                    if current_name:
+                        for pretty, name in self._preset_map.items():
+                            if name == current_name:
+                                self._current_preset = pretty
+                                break
+        finally:
+            self._fetch_in_progress = False
 
         self.async_write_ha_state()
 
@@ -765,6 +772,10 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
                 if name == vnish_preset:
                     self._current_preset = pretty
                     break
+        elif not self._preset_map and not self._fetch_in_progress and self.coordinator.miner_responding:
+            # Preset list not yet populated (e.g. miner was offline at startup);
+            # retry now that the coordinator has a live response.
+            self.hass.async_create_task(self._fetch_presets())
         super()._handle_coordinator_update()
 
     @property
