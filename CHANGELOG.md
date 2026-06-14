@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.9-beta4 (2026-06-14)
+
+- **VNish preset select: "disabled" option** (#37): adds a synthetic "disabled" entry to the preset dropdown so you can switch back from a named preset to no-preset operation directly from HA — without going into the VNish web UI.
+- **Coordinator cleanup**: replaced internal `miner_responding` flag with the standard `coordinator.available` property; `_handle_coordinator_update` now checks availability before triggering preset fetch (aligns with upstream style).
+
 ## v1.3.9-beta3 (2026-06-11)
 
 - **Offline-tolerant setup** (#31): powered-off miners no longer end in "retrying setup" — entities are created from a cached device profile and show *unavailable* until the miner returns.
