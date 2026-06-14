@@ -148,8 +148,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             miner_ip,
         )
         m_coordinator.prime_from_cached_profile()
-    else:
-        await m_coordinator.async_config_entry_first_refresh()
+    # Always start the polling loop — when offline, _async_update_data returns
+    # the primed data without raising UpdateFailed, so this completes normally
+    # and schedules the background refresh that will detect the miner once it
+    # comes back online.
+    await m_coordinator.async_config_entry_first_refresh()
 
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
