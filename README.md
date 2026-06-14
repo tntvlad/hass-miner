@@ -10,7 +10,7 @@
 [![hacs][hacsbadge]][hacs]
 [![Project Maintenance][maintenance-shield]][user_profile]
 
-> **⚠️ BETA BRANCH** - This branch contains experimental features that are not yet merged to main. Current version: **v1.3.8-beta5**
+> **⚠️ BETA BRANCH** - This branch contains experimental features that are not yet merged to main. Current version: **v1.3.9-beta3**
 
 > **Note:** This is a fork of the original [Schnitzel/hass-miner](https://github.com/Schnitzel/hass-miner) which is no longer actively maintained. Full credit goes to [@Schnitzel](https://github.com/Schnitzel) and [@b-rowan](https://github.com/b-rowan) for creating this excellent integration.
 
