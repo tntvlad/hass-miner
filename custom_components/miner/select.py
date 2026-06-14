@@ -631,6 +631,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         self._presets: list[dict] = []
         self._preset_map: dict[str, str] = {}  # pretty -> name
         self._current_preset: str | None = None
+        self._fetch_in_progress = False
 
     @property
     def name(self) -> str | None:
@@ -727,38 +728,61 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         await self._fetch_presets()
 
     async def _fetch_presets(self) -> None:
-        """Fetch available presets from VNish API."""
-        async with aiohttp.ClientSession() as session:
-            if not await self._api.unlock(session):
-                return
+        """Fetch available presets from the VNish API.
 
-            presets = await self._api.get_presets(session)
-            if not presets:
-                return
+        Runs once from async_added_to_hass and is retried on later coordinator
+        updates while the option list is still empty (see
+        _handle_coordinator_update). A single fetch can fail transiently - e.g.
+        unlock/get timing out while pyasic saturates the event loop during HA
+        startup - and without a retry the select would stay `unavailable` until
+        the next manual restart.
+        """
+        if self._fetch_in_progress:
+            return
+        self._fetch_in_progress = True
+        try:
+            async with aiohttp.ClientSession() as session:
+                if not await self._api.unlock(session):
+                    return
 
-            self._presets = presets
-            self._preset_map = {}
-            for p in presets:
-                pretty = p.get("pretty", p.get("name", "unknown"))
-                name = p.get("name", "unknown")
-                self._preset_map[pretty] = name
+                presets = await self._api.get_presets(session)
+                if not presets:
+                    return
 
-            settings = await self._api.get_settings(session)
-            if settings:
-                current_name = (
-                    settings.get("miner", {}).get("overclock", {}).get("preset")
-                )
-                if current_name:
-                    for pretty, name in self._preset_map.items():
-                        if name == current_name:
-                            self._current_preset = pretty
-                            break
+                self._presets = presets
+                self._preset_map = {}
+                for p in presets:
+                    pretty = p.get("pretty", p.get("name", "unknown"))
+                    name = p.get("name", "unknown")
+                    self._preset_map[pretty] = name
+
+                settings = await self._api.get_settings(session)
+                if settings:
+                    current_name = (
+                        settings.get("miner", {}).get("overclock", {}).get("preset")
+                    )
+                    if current_name:
+                        for pretty, name in self._preset_map.items():
+                            if name == current_name:
+                                self._current_preset = pretty
+                                break
+        finally:
+            self._fetch_in_progress = False
 
         self.async_write_ha_state()
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Update local state when coordinator data changes."""
+        # Retry the one-shot preset fetch if it never populated (e.g. it timed
+        # out during startup). Stops retrying once _preset_map is filled.
+        if (
+            not self._preset_map
+            and not self._fetch_in_progress
+            and self.coordinator.available
+            and self.hass is not None
+        ):
+            self.hass.async_create_task(self._fetch_presets())
         vnish_preset = self.coordinator.data.get("vnish_preset")
         if vnish_preset and self._preset_map:
             for pretty, name in self._preset_map.items():
