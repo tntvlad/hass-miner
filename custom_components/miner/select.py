@@ -751,6 +751,7 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
 
                 self._presets = presets
                 self._preset_map = {}
+                self._preset_map["disabled"] = "disabled"
                 for p in presets:
                     pretty = p.get("pretty", p.get("name", "unknown"))
                     name = p.get("name", "unknown")
