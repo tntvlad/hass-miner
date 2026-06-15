@@ -736,6 +736,13 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
         unlock/get timing out while pyasic saturates the event loop during HA
         startup - and without a retry the select would stay `unavailable` until
         the next manual restart.
+
+        Presets whose numeric wattage exceeds the VNish "Don't raise preset
+        above" limit (miner.overclock.preset_switcher.top_preset, set in the
+        VNish UI under /mining/performance) are hidden from the dropdown so
+        the user cannot accidentally pick a preset above their own safety
+        ceiling. The "Disabled" preset and any non-numeric preset names are
+        always kept.
         """
         if self._fetch_in_progress:
             return
@@ -745,19 +752,38 @@ class VNishPresetSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
                 if not await self._api.unlock(session):
                     return
 
+                settings = await self._api.get_settings(session)
                 presets = await self._api.get_presets(session)
                 if not presets:
                     return
 
+                top_preset: int | None = None
+                if settings:
+                    raw_top = (
+                        settings.get("miner", {})
+                        .get("overclock", {})
+                        .get("preset_switcher", {})
+                        .get("top_preset")
+                    )
+                    try:
+                        top_preset = int(raw_top) if raw_top is not None else None
+                    except (TypeError, ValueError):
+                        top_preset = None
+
                 self._presets = presets
                 self._preset_map = {}
-                self._preset_map["disabled"] = "disabled"
                 for p in presets:
                     pretty = p.get("pretty", p.get("name", "unknown"))
                     name = p.get("name", "unknown")
+                    if (
+                        top_preset is not None
+                        and isinstance(name, str)
+                        and name.isdigit()
+                        and int(name) > top_preset
+                    ):
+                        continue
                     self._preset_map[pretty] = name
 
-                settings = await self._api.get_settings(session)
                 if settings:
                     current_name = (
                         settings.get("miner", {}).get("overclock", {}).get("preset")

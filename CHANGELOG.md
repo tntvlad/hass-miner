@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.9-beta6 (2026-06-15)
+
+- **VNish preset select: respect "Don't raise preset above" limit** — presets whose wattage exceeds `miner.overclock.preset_switcher.top_preset` (set in VNish UI under /mining/performance) are now hidden from the dropdown, so users cannot accidentally pick a preset above their own safety ceiling.
+- **Fix: remove duplicate "disabled" entry** — the synthetic "disabled" option added in beta5 was duplicating the "Disabled" preset that the VNish API already returns on its own.
+
 ## v1.3.9-beta5 (2026-06-14)
 
 - **VNish preset select: "disabled" option** — adds a synthetic "disabled" entry to the preset dropdown so you can switch back from a named preset to no-preset operation directly from HA, without going into the VNish web UI.
