@@ -1329,10 +1329,18 @@ class MinerCoordinator(DataUpdateCoordinator):
         try:
             miner_data = await self.miner.get_data(include=data_options)
         except Exception as err:
-            # VNish firmware has a bug with CONFIG - retry without it
-            if "config" in str(err).lower():
+            # VNish's CONFIG fetch (settings/presets endpoints) is flaky and can
+            # fail with errors that don't mention "config" - e.g. "HTTP error
+            # sending 'settings'", or an AttributeError when the presets endpoint
+            # returns a list instead of a dict. CONFIG only feeds the optional
+            # active_preset_name/config sensors, so on ANY first-attempt failure
+            # retry once WITHOUT CONFIG before giving up. Otherwise a transient
+            # settings/presets hiccup fails the whole poll and freezes ALL sensors
+            # (including the hashboard count) at last-known-good until a manual
+            # reload - which is how a 4-board hydro can lose a board for hours.
+            if pyasic.DataOptions.CONFIG in data_options:
                 _LOGGER.warning(
-                    f"Config fetch failed for {self.miner}, retrying without CONFIG: {err}"
+                    f"get_data failed for {self.miner}, retrying without CONFIG: {err}"
                 )
                 data_options.remove(pyasic.DataOptions.CONFIG)
                 try:
