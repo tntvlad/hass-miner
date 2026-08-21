@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0-beta6 (2026-08-22)
+
+- **Stronger BitAxe/NerdMiner recovery** — the port-80 liveness check now runs for every host pyasic cannot identify, instead of only after a specific failure mode; anything serving HTTP is explicitly identified via pyasic.
+- **Decisive scan diagnostics** — already-configured miner IPs get a detailed probe line (`Probe detail for <ip>: pyasic=..., tcp80=...`), so if a known-live miner is still missed the next log shows exactly which signal failed.
+
 ## v1.4.0-beta5 (2026-08-22)
 
 - **Scan diagnostics** — scan log lines are now stamped with the integration version and report port-80 recheck statistics and a per-miner summary, so submitted logs unambiguously show which build ran and whether the BitAxe/NerdMiner fallback engaged. (HACS updates only take effect after restarting Home Assistant - if you updated without a restart you were still on the previous version.)

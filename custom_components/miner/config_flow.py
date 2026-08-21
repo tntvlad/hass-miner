@@ -44,6 +44,7 @@ from .const import (
     MAX_SCAN_HOSTS,
     PYASIC_VERSION,
     SCAN_HTTP_PORT,
+    SCAN_HTTP_TIMEOUT,
     SCAN_IDENTIFY_TIMEOUT,
     SCAN_PING_TIMEOUT,
     SCAN_TIMEOUT,
@@ -231,7 +232,7 @@ async def _async_tcp_alive(host) -> bool:
     try:
         _, writer = await asyncio.wait_for(
             asyncio.open_connection(str(host), SCAN_HTTP_PORT),
-            timeout=SCAN_PING_TIMEOUT,
+            timeout=SCAN_HTTP_TIMEOUT,
         )
     except Exception:
         return False
@@ -273,18 +274,41 @@ async def _async_scan_for_miners(
     # unsupported esp-miner firmware).
     stats = {"rechecked": 0, "identified": 0}
 
+    # IPs of already-configured miners: their probe outcome is logged in
+    # detail, which makes submitted logs decisive when a known-live miner
+    # (e.g. a BitAxe the coordinator polls fine) is not rediscovered.
+    watched_ips = set()
+    for entry in hass.config_entries.async_entries():
+        if entry.domain != DOMAIN or entry.source == config_entries.SOURCE_IGNORE:
+            continue
+        ip_value = str(entry.data.get(CONF_IP, "")).strip()
+        if ip_value:
+            watched_ips.add(ip_value)
+
     async def _probe_host(miner_net_, host):
+        host_str = str(host)
+        watched = host_str in watched_ips
         async with probe_semaphore:
+            pyasic_result = "miner"
             try:
                 miner = await miner_net_.ping_and_get_miner(host)
                 if miner is not None:
                     return miner
-            except Exception:
-                pass
-            # Second chance for esp-miner-class devices whose abrupt close
-            # fools pyasic into reporting "refused": verify the HTTP port
-            # ourselves and identify the device explicitly.
-            if not await _async_tcp_alive(host):
+                pyasic_result = "none"
+            except Exception as err:  # noqa: BLE001 - probe must never abort the sweep
+                pyasic_result = f"error: {type(err).__name__}"
+            # pyasic found nothing - recheck the HTTP port ourselves. This
+            # union signal recovers esp-miner devices (BitAxe/NerdMiner)
+            # whose abrupt close pyasic misclassifies as "refused".
+            alive = await _async_tcp_alive(host)
+            if watched:
+                _LOGGER.info(
+                    "Probe detail for configured %s: pyasic=%s, tcp80=%s",
+                    host_str,
+                    pyasic_result,
+                    "open" if alive else "closed",
+                )
+            if not alive:
                 return None
             stats["rechecked"] += 1
             try:

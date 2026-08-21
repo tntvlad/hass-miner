@@ -77,6 +77,11 @@ SCAN_PING_TIMEOUT = 1
 # esp-miner HTTP devices (BitAxe, NerdMiner) serve their API on port 80.
 SCAN_HTTP_PORT = 80
 
+# Connect timeout (seconds) for the integration's own port-80 liveness check.
+# Slightly above the ping timeout because embedded HTTP servers can accept
+# slowly under load; probes run concurrently so this adds no wall time.
+SCAN_HTTP_TIMEOUT = 2
+
 # Per-host cap (seconds) for identifying a device that pyasic's probe missed
 # but which answers on the fallback port. Bounds worst-case sweeps over LANs
 # with many non-miner devices running web UIs (routers, printers).
