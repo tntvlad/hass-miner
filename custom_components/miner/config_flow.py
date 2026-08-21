@@ -1,6 +1,7 @@
 """Config flow for Miner."""
 
 import asyncio
+import ipaddress
 import logging
 from importlib.metadata import version
 
@@ -24,15 +25,19 @@ from .const import (
     CONF_IP,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
+    CONF_RESCAN,
     CONF_RPC_PASSWORD,
     CONF_SCAN_MINER,
+    CONF_SCAN_NETWORK,
     CONF_SSH_PASSWORD,
     CONF_SSH_USERNAME,
     CONF_TITLE,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     DOMAIN,
+    MAX_SCAN_HOSTS,
     PYASIC_VERSION,
+    SCAN_PING_TIMEOUT,
     SCAN_TIMEOUT,
 )
 
@@ -75,27 +80,158 @@ def _ensure_pyasic():
 
 _LOGGER = logging.getLogger(__name__)
 
+# Ranges that never contain user miners: unspecified, loopback, link-local,
+# CGNAT (Tailscale/VPN), multicast/reserved. Scanning them wastes time and
+# on large VPN ranges can exhaust memory.
+_SKIP_RANGES = [
+    ipaddress.ip_network(range_str)
+    for range_str in (
+        "0.0.0.0/8",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "100.64.0.0/10",
+        "224.0.0.0/3",
+    )
+]
 
-async def _async_scan_for_miners(hass: HomeAssistant) -> list:
-    """Scan all Home Assistant IPv4 subnets for miners.
 
-    Returns a list of detected pyasic miner objects, sorted by IP,
-    deduplicated across adapters.
+def _validate_custom_cidr(value) -> tuple[ipaddress.IPv4Network | None, str | None]:
+    """Validate a user-entered CIDR for scanning.
+
+    Returns (network, error_base). A blank value means "no custom range"
+    and validates to (None, None).
+    """
+    if value is None or not str(value).strip():
+        return None, None
+    try:
+        net = ipaddress.ip_network(str(value).strip(), strict=False)
+    except ValueError:
+        return None, "invalid_cidr"
+    if not isinstance(net, ipaddress.IPv4Network):
+        return None, "invalid_cidr"
+    if net.num_addresses > MAX_SCAN_HOSTS:
+        return None, "cidr_too_large"
+    if any(net.overlaps(skip) for skip in _SKIP_RANGES):
+        return None, "invalid_cidr"
+    return net, None
+
+
+def _usable_subnet(net: ipaddress.IPv4Network) -> bool:
+    """Return whether a network is worth scanning."""
+    if not isinstance(net, ipaddress.IPv4Network):
+        return False
+    if net.num_addresses > MAX_SCAN_HOSTS:
+        _LOGGER.info(
+            "Skipping oversized subnet %s (%d addresses > %d)",
+            net,
+            net.num_addresses,
+            MAX_SCAN_HOSTS,
+        )
+        return False
+    if any(net.overlaps(skip) for skip in _SKIP_RANGES):
+        _LOGGER.info("Skipping internal subnet %s", net)
+        return False
+    return True
+
+
+async def _async_candidate_subnets(
+    hass: HomeAssistant, custom_net: ipaddress.IPv4Network | None = None
+) -> list[ipaddress.IPv4Network]:
+    """Build the list of networks worth scanning.
+
+    Sources, in order of preference (first match wins on overlap):
+      1. an explicitly user-entered CIDR
+      2. /24s around already-configured miner IPs - on Home Assistant OS the
+         HA container only sees its internal bridge, so existing miner IPs are
+         the only reliable hint where the LAN actually is
+      3. adapter subnets (Container/venv installs where HA sits on the LAN)
+    """
+    candidates: list[ipaddress.IPv4Network] = []
+
+    def _add(net: ipaddress.IPv4Network | None) -> None:
+        if net is None or not _usable_subnet(net):
+            return
+        # Skip exact duplicates and subnets contained in one we already have.
+        if any(net.subnet_of(existing) or existing.subnet_of(net) for existing in candidates):
+            return
+        candidates.append(net)
+
+    if custom_net is not None:
+        _add(custom_net)
+
+    for entry in hass.config_entries.async_entries():
+        if entry.domain != DOMAIN or entry.source == config_entries.SOURCE_IGNORE:
+            continue
+        try:
+            addr = ipaddress.ip_address(str(entry.data.get(CONF_IP, "")))
+        except ValueError:
+            continue
+        if addr.version != 4:
+            continue
+        _add(ipaddress.ip_network(f"{addr}/24", strict=False))
+
+    try:
+        adapters = await network.async_get_adapters(hass)
+    except Exception:
+        _LOGGER.warning("Could not enumerate network adapters", exc_info=True)
+        adapters = []
+    for adapter in adapters:
+        for ip_info in adapter.get("ipv4") or []:
+            local_ip = ip_info.get("address")
+            prefix = ip_info.get("network_prefix")
+            if not local_ip or prefix in (None, ""):
+                continue
+            try:
+                net = ipaddress.ip_network(f"{local_ip}/{prefix}", strict=False)
+            except ValueError:
+                # Malformed adapter data must never kill discovery.
+                _LOGGER.warning(
+                    "Skipping unusable adapter address %s/%s", local_ip, prefix
+                )
+                continue
+            _add(net)
+
+    _LOGGER.info(
+        "Miner discovery will scan: %s", ", ".join(str(net) for net in candidates)
+    )
+    return candidates
+
+
+async def _async_scan_for_miners(
+    hass: HomeAssistant, custom_net: ipaddress.IPv4Network | None = None
+) -> list:
+    """Scan candidate networks for miners.
+
+    Returns a list of detected pyasic miner objects, sorted by IP and
+    deduplicated across networks. Each subnet is scanned independently so a
+    single failure cannot abort discovery.
     """
     await hass.async_add_executor_job(_ensure_pyasic)
-    adapters = await network.async_get_adapters(hass)
+
+    subnets = await _async_candidate_subnets(hass, custom_net)
+    if not subnets:
+        return []
+
+    # Short ping timeout while sweeping dead addresses; restored afterwards.
+    old_ping_timeout = pyasic.settings.get("network_ping_timeout", 3)
+    pyasic.settings.update("network_ping_timeout", SCAN_PING_TIMEOUT)
 
     miners = []
     seen_ips = set()
-    for adapter in adapters:
-        for ip_info in adapter["ipv4"]:
-            local_ip = ip_info["address"]
-            network_prefix = ip_info["network_prefix"]
-            miner_net = MinerNetwork.from_subnet(f"{local_ip}/{network_prefix}")
-            for miner in await miner_net.scan():
-                if str(miner.ip) not in seen_ips:
-                    seen_ips.add(str(miner.ip))
-                    miners.append(miner)
+    try:
+        for subnet in subnets:
+            try:
+                found = await MinerNetwork.from_subnet(str(subnet)).scan()
+            except Exception:
+                _LOGGER.warning("Scanning %s failed", subnet, exc_info=True)
+                continue
+            new_miners = [m for m in found if str(m.ip) not in seen_ips]
+            seen_ips.update(str(m.ip) for m in new_miners)
+            miners.extend(new_miners)
+            _LOGGER.info("Scanned %s: found %d miner(s)", subnet, len(new_miners))
+    finally:
+        pyasic.settings.update("network_ping_timeout", old_ping_timeout)
+
     miners.sort()
     return miners
 
@@ -139,6 +275,9 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data = {}
         self._miner = None
         self._discovered = None
+        self._scan_task = None
+        self._scan_done = False
+        self._custom_net = None
 
     async def async_step_user(self, user_input=None):
         """Get miner IP and check if it is available.
@@ -168,6 +307,8 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not user_input.get(CONF_IP, "").strip():
             # No IP entered - scan the network for miners.
+            self._custom_net = None
+            self._scan_done = False
             return await self.async_step_scan()
 
         errors, miner = await validate_ip_input(self.hass, user_input)
@@ -188,52 +329,102 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ip = str(getattr(miner, "ip", "") or "?")
         return f"{model} ({ip})"
 
-    def _scan_schema(self):
-        """Build the miner-selection schema from discovered miners."""
-        options = [
-            {"value": str(miner.ip), "label": self._miner_label(miner)}
-            for miner in self._discovered
-        ]
-        return vol.Schema(
-            {
-                vol.Required(CONF_SCAN_MINER): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                )
-            }
+    def _log_scan_exception(self, task: asyncio.Task) -> None:
+        """Log exceptions from the background scan task if nobody awaited it."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            _LOGGER.warning("Background miner network scan failed: %s", exc)
+
+    async def _start_scan(self):
+        """Launch the network scan as a background task and show progress."""
+        self._discovered = None
+        self._scan_done = False
+        custom_net = self._custom_net
+
+        async def _scan_with_timeout():
+            return await asyncio.wait_for(
+                _async_scan_for_miners(self.hass, custom_net), timeout=SCAN_TIMEOUT
+            )
+
+        self._scan_task = asyncio.create_task(_scan_with_timeout())
+        self._scan_task.add_done_callback(self._log_scan_exception)
+        return self.async_show_progress(
+            step_id="scan",
+            progress_action="scan_network",
         )
 
-    async def _run_scan(self):
-        """Run the network scan with a hard overall timeout."""
+    async def async_step_scan(self, user_input=None):
+        """Show a progress screen while the scan runs, then move to results.
+
+        While the progress screen is up, the frontend polls this step; once
+        the background task has finished the poll moves the flow to
+        ``scan_result``.
+        """
+        # Stray polls after completion must not restart the scan.
+        if self._scan_done and self._scan_task is None:
+            return self.async_show_progress_done(next_step_id="scan_result")
+
+        if self._scan_task is None:
+            return await self._start_scan()
+
         try:
-            return await asyncio.wait_for(
-                _async_scan_for_miners(self.hass), timeout=SCAN_TIMEOUT
-            )
+            self._discovered = await self._scan_task
         except (TimeoutError, asyncio.TimeoutError):
             _LOGGER.warning(
                 "Network scan for miners timed out after %s seconds", SCAN_TIMEOUT
             )
-            return []
+            self._discovered = []
+        except Exception:
+            _LOGGER.warning("Miner network scan failed", exc_info=True)
+            self._discovered = []
+        finally:
+            self._scan_task = None
+            self._scan_done = True
 
-    async def async_step_scan(self, user_input=None):
-        """Scan the network for miners and let the user pick one."""
-        # First entry into the step (or a rescan requested by submitting an
-        # empty form): run the scan and present results.
-        if user_input is None or CONF_SCAN_MINER not in user_input:
-            self._discovered = await self._run_scan()
+        return self.async_show_progress_done(next_step_id="scan_result")
 
-            if not self._discovered:
-                # Empty schema renders a submit/back-only form so the user
-                # can retry the scan.
-                return self.async_show_form(
-                    step_id="scan",
-                    data_schema=vol.Schema({}),
-                    errors={"base": "no_miners_found"},
+    def _show_scan_result_form(self, errors=None):
+        """Render the scan-result form (dropdown when miners were found)."""
+        schema_data = {}
+        if self._discovered:
+            options = [
+                {"value": str(miner.ip), "label": self._miner_label(miner)}
+                for miner in self._discovered
+            ]
+            schema_data[vol.Required(CONF_SCAN_MINER)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    mode=SelectSelectorMode.DROPDOWN,
                 )
+            )
+        else:
+            errors = errors or {"base": "no_miners_found"}
+        schema_data[vol.Optional(CONF_SCAN_NETWORK, default="")] = str
+        schema_data[vol.Optional(CONF_RESCAN, default=False)] = bool
+        return self.async_show_form(
+            step_id="scan_result",
+            data_schema=vol.Schema(schema_data),
+            errors=errors,
+        )
 
-            return self.async_show_form(step_id="scan", data_schema=self._scan_schema())
+    async def async_step_scan_result(self, user_input=None):
+        """Let the user pick a discovered miner, rescan or set a CIDR."""
+        if user_input is None:
+            return self._show_scan_result_form()
+
+        wants_rescan = user_input.get(CONF_RESCAN) or CONF_SCAN_MINER not in user_input
+
+        if wants_rescan:
+            custom_net, cidr_error = _validate_custom_cidr(
+                user_input.get(CONF_SCAN_NETWORK)
+            )
+            if cidr_error:
+                return self._show_scan_result_form({"base": cidr_error})
+            self._custom_net = custom_net
+            self._scan_done = False
+            return await self.async_step_scan()
 
         selected_ip = user_input[CONF_SCAN_MINER]
         miner = next(
@@ -245,14 +436,11 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             None,
         )
         if miner is None:
-            return self.async_show_form(
-                step_id="scan",
-                data_schema=self._scan_schema(),
-                errors={"base": "invalid_selection"},
-            )
+            return self._show_scan_result_form({"base": "invalid_selection"})
 
         self._miner = miner
         self._data[CONF_IP] = selected_ip
+        self._scan_done = False
         return await self.async_step_login()
 
     async def async_step_login(self, user_input=None):

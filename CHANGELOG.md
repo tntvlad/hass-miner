@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.0-beta2 (2026-08-21)
+
+- **Fix scan crash / HA restart** — discovery no longer scans internal networks (docker bridges, Tailscale/CGNAT, link-local, loopback) or any range larger than 1024 addresses; sweeping those could exhaust memory and take Home Assistant down. Malformed adapter data and per-subnet failures are now contained and logged instead of surfacing as "Unknown error occurred".
+- **Fix discovery on Home Assistant OS** — HAOS runs HA in an internal container network, so adapter-derived subnets never contain your LAN. Candidate ranges are now derived from already-configured miner IPs as well, and the scan screen gained an optional **Network range** field (CIDR, e.g. `192.168.1.0/24`) to point the scan anywhere.
+- **Proper progress screen** — scanning shows a real progress page instead of a spinning submit button.
+- **Faster sweeps** — ping timeout is temporarily lowered while scanning.
+
 ## v1.4.0-beta1 (2026-08-21)
 
 - **Network scan-for-miners** — leave the IP field empty during setup and the integration scans the subnet(s) Home Assistant is connected to; discovered miners are offered in a dropdown to pick from. Scan is bounded by a 120 s timeout and can be re-run if nothing is found.

@@ -11,10 +11,18 @@
         }
       },
       "scan": {
-        "title": "Scan for Miners",
-        "description": "Miners discovered on your network. Select one to continue.",
+        "description": "Scanning your network for miners. This can take up to two minutes."
+      },
+      "scan_result": {
+        "title": "Scan Results",
+        "description": "Select a discovered miner to continue, or adjust the options and scan again.",
         "data": {
-          "scan_miner": "Discovered miner"
+          "scan_miner": "Discovered miner",
+          "scan_network": "Network range (optional)",
+          "rescan": "Scan again"
+        },
+        "data_description": {
+          "scan_network": "CIDR range to scan, e.g. 192.168.1.0/24. Useful on Home Assistant OS, where automatic detection cannot see your LAN because HA runs in an internal container network."
         }
       },
       "login": {
@@ -43,8 +51,13 @@
       }
     },
     "error": {
-      "no_miners_found": "No miners were found on your network. Submit to scan again, or go back and enter an IP address manually.",
-      "invalid_selection": "The selected miner could no longer be found. Submit to scan again."
+      "no_miners_found": "No miners were found on your network. Scan again, optionally entering your network range below.",
+      "invalid_selection": "The selected miner could no longer be found. Scan again.",
+      "invalid_cidr": "Invalid network range. Use CIDR notation, e.g. 192.168.1.0/24.",
+      "cidr_too_large": "Network range is too large to scan (max 1024 addresses)."
+    },
+    "progress": {
+      "scan_network": "Scanning your network for miners…"
     },
     "abort": {
       "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",

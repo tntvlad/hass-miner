@@ -145,7 +145,9 @@ Best difficulty and found-block sensors via the local HTTP API (`/api/system/inf
 3. Enter your miner's IP address — **or leave it empty to scan your network** for miners and pick one from the discovered list
 4. Follow the prompts for credentials (if required) and finish setup
 
-Repeat per miner. The network scan covers the subnet(s) Home Assistant is connected to and can take up to a couple of minutes on large networks.
+Repeat per miner. The network scan can take up to a couple of minutes; large or internal networks are skipped automatically.
+
+> **Home Assistant OS users:** HA runs in an internal container network and cannot see your LAN directly. If nothing is found, enter your LAN range (e.g. `192.168.1.0/24`) in the **Network range** field on the scan screen and scan again — ranges of already-configured miners are picked up automatically.
 
 ## Known Issues
 

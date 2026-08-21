@@ -17,6 +17,14 @@ CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 # user picked from the discovered list.
 CONF_SCAN_MINER = "scan_miner"
 
+# Optional CIDR (e.g. 192.168.1.0/24) the user can enter to point the scan at
+# a specific range - needed on Home Assistant OS, where HA runs in a container
+# on an internal bridge and adapter-derived subnets never contain the LAN.
+CONF_SCAN_NETWORK = "scan_network"
+
+# Checkbox on the scan-result form to re-run the scan.
+CONF_RESCAN = "rescan"
+
 # Config-entry data key for the device profile captured on the last successful
 # update (identity, capabilities, firmware-type flags). Lets the integration
 # set up while the miner is powered off (e.g. for energy saving) instead of
@@ -49,6 +57,15 @@ MINER_DETECTION_TIMEOUT = 45
 # the slowest realistic case while still bounding how long the config-flow
 # form can hang.
 SCAN_TIMEOUT = 120
+
+# Networks larger than this (in addresses) are never scanned - internal
+# docker/VPN bridges (e.g. 172.17.0.0/16 or Tailscale's 100.64.0.0/10) would
+# otherwise create tens of thousands of ping tasks and can OOM small hosts.
+MAX_SCAN_HOSTS = 1024
+
+# pyasic network_ping_timeout override while scanning (default 3 s). Sweeping
+# a /24 with dead IPs is ~3x faster at 1 s and miners answer well within it.
+SCAN_PING_TIMEOUT = 1
 
 # Number of consecutive update failures absorbed by returning last-known-good
 # data before UpdateFailed is raised. One flaky poll (transient API/HTTP error
