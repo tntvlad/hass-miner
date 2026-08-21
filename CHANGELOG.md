@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0-beta1 (2026-08-21)
+
+- **Network scan-for-miners** — leave the IP field empty during setup and the integration scans the subnet(s) Home Assistant is connected to; discovered miners are offered in a dropdown to pick from. Scan is bounded by a 120 s timeout and can be re-run if nothing is found.
+- **Duplicate protection** — config entries now get a unique ID (miner MAC address, IP fallback), so the same miner can no longer be added twice.
+- **README refresh** — documents all entity platforms and services, direct vendor integrations (BOS REST + gRPC, VNish throttle/presets, BitAxe, Avalon Nano full mode) and the offline-tolerant setup behavior.
+
 ## v1.3.9-beta6 (2026-06-15)
 
 - **VNish preset select: respect "Don't raise preset above" limit** — presets whose wattage exceeds `miner.overclock.preset_switcher.top_preset` (set in VNish UI under /mining/performance) are now hidden from the dropdown, so users cannot accidentally pick a preset above their own safety ceiling.
