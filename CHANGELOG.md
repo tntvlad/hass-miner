@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0-beta8 (2026-08-22)
+
+- **Gentle retry pass for WiFi miners** — the BitAxe/NerdMiner are WiFi-only ESP32 devices whose tiny stacks drop probes while a 254-host sweep saturates them (found on only 1 of 4 scans). Hosts that stay *silently* unresponsive during the main sweep are now re-probed calmly seconds later, when they answer reliably. Definitively-refused hosts are not retried, keeping the extra time to a few seconds.
+- Clearer scan summary lines: per-subnet retry recoveries plus totals for HTTP-fallback identifications.
+
 ## v1.4.0-beta7 (2026-08-22)
 
 - **Reliable BitAxe discovery** — esp-miner devices reset bare TCP connections that carry no data, so both pyasic's probe and a plain connect test lost them intermittently (found on 1 of 4 scans). The fallback now sends a real HTTP GET; a connection with a request in flight is served normally, making detection deterministic.

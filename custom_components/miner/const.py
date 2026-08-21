@@ -87,6 +87,14 @@ SCAN_HTTP_TIMEOUT = 2
 # with many non-miner devices running web UIs (routers, printers).
 SCAN_IDENTIFY_TIMEOUT = 30
 
+# The gentle retry pass: WiFi miners (BitAxe/NerdMiner) routinely drop probes
+# while a sweep's connection storm saturates their tiny stacks, then answer
+# normally seconds later. Hosts that stayed silently unresponsive ("drowsy")
+# are re-probed politely once the storm has passed.
+SCAN_RETRY_TIMEOUT = 5
+SCAN_RETRY_CONCURRENCY = 16
+MAX_RETRY_HOSTS = 64
+
 # Number of consecutive update failures absorbed by returning last-known-good
 # data before UpdateFailed is raised. One flaky poll (transient API/HTTP error
 # while the miner is actually fine) then produces a DEBUG line instead of an

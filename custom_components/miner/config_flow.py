@@ -40,6 +40,7 @@ from .const import (
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     DOMAIN,
+    MAX_RETRY_HOSTS,
     MAX_SCAN_CONCURRENCY,
     MAX_SCAN_HOSTS,
     PYASIC_VERSION,
@@ -47,6 +48,8 @@ from .const import (
     SCAN_HTTP_TIMEOUT,
     SCAN_IDENTIFY_TIMEOUT,
     SCAN_PING_TIMEOUT,
+    SCAN_RETRY_CONCURRENCY,
+    SCAN_RETRY_TIMEOUT,
     SCAN_TIMEOUT,
 )
 
@@ -220,28 +223,38 @@ async def _async_candidate_subnets(
     return candidates
 
 
-async def _async_http_conversation(host, read_limit: int | None = None) -> bytes | None:
-    """Perform a minimal HTTP GET against host and return the response head.
+async def _async_http_conversation(
+    host, *, read_limit: int = 64, timeout: int | float = SCAN_HTTP_TIMEOUT
+) -> tuple[str, bytes]:
+    """Perform a minimal HTTP GET against host.
 
     Sending a real request matters: esp-miner devices (BitAxe/NerdMiner)
     reset bare connections that carry no data - which is how pyasic's
     connect-and-close probe loses them - while a connection with a request
-    in flight is served normally. Returns None when the host is unreachable,
-    times out, or closes without any response bytes.
+    in flight is served normally.
+
+    Returns (status, data): status is "ok" (data holds the response head),
+    "refused" (definitively nothing there) or "timeout" (silent - possibly a
+    drowsy WiFi device that dropped us under load, worth retrying later).
     """
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(str(host), SCAN_HTTP_PORT),
-            timeout=SCAN_HTTP_TIMEOUT,
+            timeout=timeout,
         )
+    except (TimeoutError, asyncio.TimeoutError):
+        return "timeout", b""
     except Exception:
-        return None
+        return "refused", b""
     try:
         writer.write(b"GET / HTTP/1.0\r\nHost: miner-scan\r\nUser-Agent: hass-miner\r\n\r\n")
         await writer.drain()
-        return await asyncio.wait_for(reader.read(read_limit or 64), timeout=SCAN_HTTP_TIMEOUT)
+        data = await asyncio.wait_for(reader.read(read_limit), timeout=timeout)
+        return ("ok", data) if data else ("refused", b"")
+    except (TimeoutError, asyncio.TimeoutError):
+        return "timeout", b""
     except Exception:
-        return None
+        return "refused", b""
     finally:
         writer.close()
         # A reset here still proves the exchange happened - ignore it.
@@ -275,10 +288,12 @@ async def _async_scan_for_miners(
         "Network scan starting (integration %s)", _integration_version()
     )
 
-    # Counters for the per-subnet log line - they make the port-80 recheck
-    # visible in submitted logs (alive-but-unidentified hosts point at
-    # unsupported esp-miner firmware).
-    stats = {"rechecked": 0, "identified": 0}
+    # Counters for the summary log lines - they make the HTTP fallback and
+    # retry pass visible in submitted logs.
+    stats = {"identified": 0, "retried": 0}
+    # Hosts that stayed silently unresponsive during the main pass; they get
+    # a gentle second chance once the connection storm has passed.
+    sleepy_hosts: list = []
 
     # IPs of already-configured miners: their probe outcome is logged in
     # detail, which makes submitted logs decisive when a known-live miner
@@ -290,6 +305,28 @@ async def _async_scan_for_miners(
         ip_value = str(entry.data.get(CONF_IP, "")).strip()
         if ip_value:
             watched_ips.add(ip_value)
+
+    async def _identify_via_http(host_str: str, response: bytes):
+        """Identify a host that answered HTTP; log its banner if unsupported."""
+        try:
+            miner = await asyncio.wait_for(
+                pyasic.get_miner(host_str), timeout=SCAN_IDENTIFY_TIMEOUT
+            )
+        except Exception:
+            _LOGGER.debug(
+                "Could not identify %s despite an open port", host_str, exc_info=True
+            )
+            return None
+        if miner is not None:
+            stats["identified"] += 1
+            return miner
+        snippet = " ".join(response.decode("ascii", errors="replace").split())[:120]
+        _LOGGER.info(
+            "Device at %s serves HTTP but pyasic cannot identify it; response head: %s",
+            host_str,
+            snippet or "<empty>",
+        )
+        return None
 
     async def _probe_host(miner_net_, host):
         host_str = str(host)
@@ -306,37 +343,32 @@ async def _async_scan_for_miners(
             # pyasic found nothing - talk HTTP ourselves. This union signal
             # recovers esp-miner devices (BitAxe/NerdMiner), which reset bare
             # connect-and-close probes and are therefore invisible to pyasic.
-            response = await _async_http_conversation(host, read_limit=512)
-            alive = bool(response)
+            status, response = await _async_http_conversation(host, read_limit=512)
             if watched:
                 _LOGGER.info(
                     "Probe detail for configured %s: pyasic=%s, http80=%s",
                     host_str,
                     pyasic_result,
-                    "answered" if alive else "no answer",
+                    status,
                 )
-            if not alive:
+            if status == "timeout":
+                sleepy_hosts.append(host)
+            if status != "ok":
                 return None
-            stats["rechecked"] += 1
-            try:
-                miner = await asyncio.wait_for(
-                    pyasic.get_miner(str(host)), timeout=SCAN_IDENTIFY_TIMEOUT
-                )
-            except Exception:
-                _LOGGER.debug(
-                    "Could not identify %s despite an open port", host, exc_info=True
-                )
-                return None
-            if miner is not None:
-                stats["identified"] += 1
-                return miner
-            snippet = " ".join(response.decode("ascii", errors="replace").split())[:120]
-            _LOGGER.info(
-                "Device at %s serves HTTP but pyasic cannot identify it; response head: %s",
-                host_str,
-                snippet or "<empty>",
+            return await _identify_via_http(host_str, response)
+
+    retry_semaphore = asyncio.Semaphore(SCAN_RETRY_CONCURRENCY)
+
+    async def _retry_probe(host):
+        """Re-probe a drowsy host calmly and identify it if it wakes up."""
+        host_str = str(host)
+        async with retry_semaphore:
+            status, response = await _async_http_conversation(
+                host, read_limit=512, timeout=SCAN_RETRY_TIMEOUT
             )
-            return miner
+            if status != "ok":
+                return None
+            return await _identify_via_http(host_str, response)
 
     miners = []
     seen_ips = set()
@@ -362,24 +394,57 @@ async def _async_scan_for_miners(
                     len(probe_errors),
                     len(results),
                 )
-            new_miners = [m for m in found if str(m.ip) not in seen_ips]
+
+            # Gentle retry for drowsy hosts - WiFi miners (BitAxe/NerdMiner)
+            # drop probes while the sweep's connection storm saturates their
+            # tiny stacks, then answer fine seconds later. Cap the set so a
+            # firewalled subnet cannot turn the retry into a second storm.
+            retry_found = []
+            if sleepy_hosts:
+                drowsy = list(sleepy_hosts)
+                sleepy_hosts.clear()
+                if len(drowsy) > MAX_RETRY_HOSTS:
+                    watched_drowsy = [h for h in drowsy if str(h) in watched_ips]
+                    _LOGGER.info(
+                        "Retry pass limited to %d configured miner IP(s); %d hosts were drowsy",
+                        len(watched_drowsy),
+                        len(drowsy),
+                    )
+                    drowsy = watched_drowsy
+                if drowsy:
+                    retry_results = await asyncio.gather(
+                        *(_retry_probe(host) for host in drowsy),
+                        return_exceptions=True,
+                    )
+                    retry_found = [
+                        r
+                        for r in retry_results
+                        if r is not None and not isinstance(r, BaseException)
+                    ]
+                stats["retried"] += len(retry_found)
+
+            new_miners = [
+                m for m in found + retry_found if str(m.ip) not in seen_ips
+            ]
             seen_ips.update(str(m.ip) for m in new_miners)
             miners.extend(new_miners)
             _LOGGER.info(
-                "Scanned %s: found %d miner(s) (port-80 recheck: %d alive, %d identified)",
+                "Scanned %s: found %d miner(s) (retry pass recovered %d)",
                 subnet,
                 len(new_miners),
-                stats["rechecked"],
-                stats["identified"],
+                len(retry_found),
             )
     finally:
         pyasic.settings.update("network_ping_timeout", old_ping_timeout)
 
     _LOGGER.info(
-        "Network scan finished in %.1fs: %d miner(s) across %d subnet(s)",
+        "Network scan finished in %.1fs: %d miner(s) across %d subnet(s) "
+        "(%d via HTTP fallback, %d recovered by retry)",
         time.monotonic() - scan_started,
         len(miners),
         len(subnets),
+        stats["identified"],
+        stats["retried"],
     )
     for miner in miners:
         _LOGGER.info(
