@@ -73,6 +73,15 @@ MAX_SCAN_CONCURRENCY = 255
 # a /24 with dead IPs is ~3x faster at 1 s and miners answer well within it.
 SCAN_PING_TIMEOUT = 1
 
+# Port probed as a fallback when pyasic's own probe reports nothing: all
+# esp-miner HTTP devices (BitAxe, NerdMiner) serve their API on port 80.
+SCAN_HTTP_PORT = 80
+
+# Per-host cap (seconds) for identifying a device that pyasic's probe missed
+# but which answers on the fallback port. Bounds worst-case sweeps over LANs
+# with many non-miner devices running web UIs (routers, printers).
+SCAN_IDENTIFY_TIMEOUT = 30
+
 # Number of consecutive update failures absorbed by returning last-known-good
 # data before UpdateFailed is raised. One flaky poll (transient API/HTTP error
 # while the miner is actually fine) then produces a DEBUG line instead of an

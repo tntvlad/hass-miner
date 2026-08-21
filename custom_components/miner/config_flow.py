@@ -1,6 +1,7 @@
 """Config flow for Miner."""
 
 import asyncio
+import contextlib
 import ipaddress
 import logging
 from importlib.metadata import version
@@ -38,6 +39,8 @@ from .const import (
     MAX_SCAN_CONCURRENCY,
     MAX_SCAN_HOSTS,
     PYASIC_VERSION,
+    SCAN_HTTP_PORT,
+    SCAN_IDENTIFY_TIMEOUT,
     SCAN_PING_TIMEOUT,
     SCAN_TIMEOUT,
 )
@@ -198,6 +201,29 @@ async def _async_candidate_subnets(
     return candidates
 
 
+async def _async_tcp_alive(host) -> bool:
+    """Return whether anything accepts a TCP connection on the fallback port.
+
+    Unlike pyasic's probe this tolerates an abrupt close: esp-miner devices
+    (BitAxe/NerdMiner families) accept the connection and reset it because no
+    data follows, which pyasic misclassifies as "refused" - without this
+    second chance those miners are never discovered even though they serve
+    their API on port 80.
+    """
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(str(host), SCAN_HTTP_PORT),
+            timeout=SCAN_PING_TIMEOUT,
+        )
+    except Exception:
+        return False
+        writer.close()
+        # A reset here still proves a listener existed - ignore it.
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return True
+
+
 async def _async_scan_for_miners(
     hass: HomeAssistant, custom_net: ipaddress.IPv4Network | None = None
 ) -> list:
@@ -222,7 +248,26 @@ async def _async_scan_for_miners(
 
     async def _probe_host(miner_net_, host):
         async with probe_semaphore:
-            return await miner_net_.ping_and_get_miner(host)
+            try:
+                miner = await miner_net_.ping_and_get_miner(host)
+                if miner is not None:
+                    return miner
+            except Exception:
+                pass
+            # Second chance for esp-miner-class devices whose abrupt close
+            # fools pyasic into reporting "refused": verify the HTTP port
+            # ourselves and identify the device explicitly.
+            if not await _async_tcp_alive(host):
+                return None
+            try:
+                return await asyncio.wait_for(
+                    pyasic.get_miner(str(host)), timeout=SCAN_IDENTIFY_TIMEOUT
+                )
+            except Exception:
+                _LOGGER.debug(
+                    "Could not identify %s despite an open port", host, exc_info=True
+                )
+                return None
 
     miners = []
     seen_ips = set()

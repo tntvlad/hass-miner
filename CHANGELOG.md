@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0-beta4 (2026-08-22)
+
+- **Discovery now finds BitAxe / NerdMiner** — esp-miner devices accept the scan's TCP probe and then reset the connection, which pyasic misreads as "refused" and skips; the Gamma at 192.168.1.92 was therefore never offered despite answering every poll. After pyasic's probe reports nothing, the integration now re-checks port 80 itself (tolerating the reset) and identifies the device explicitly.
+- **Progress screen text** — "Scanning your network for miners…" shows next to the spinner (hard-refresh the browser with Ctrl+F5 if HA still shows a bare circle - translations are cached).
+
 ## v1.4.0-beta3 (2026-08-21)
 
 - **Fix scan flow stalling / orphaned scans** — the progress screen now passes its backing task to Home Assistant (`progress_task`), as current HA requires. Without it HA logged a warning and the scan could silently die when the dialog was dismissed, leaving "no miner found".
