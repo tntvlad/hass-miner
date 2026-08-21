@@ -13,6 +13,10 @@ CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 
+# Config-flow key for the network-scan step: holds the IP of the miner the
+# user picked from the discovered list.
+CONF_SCAN_MINER = "scan_miner"
+
 # Config-entry data key for the device profile captured on the last successful
 # update (identity, capabilities, firmware-type flags). Lets the integration
 # set up while the miner is powered off (e.g. for energy saving) instead of
@@ -38,6 +42,13 @@ PYASIC_VERSION = "0.78.12"
 # comfortably above that - too small a value spuriously times out valid miners
 # during setup, leaving the config entry stuck in setup_retry.
 MINER_DETECTION_TIMEOUT = 45
+
+# Hard timeout (seconds) for a whole network scan in the config flow. pyasic
+# pings every host of each adapter subnet (255 hosts on a /24, 3s ping
+# timeout) and then runs miner detection on responders; this comfortably fits
+# the slowest realistic case while still bounding how long the config-flow
+# form can hang.
+SCAN_TIMEOUT = 120
 
 # Number of consecutive update failures absorbed by returning last-known-good
 # data before UpdateFailed is raised. One flaky poll (transient API/HTTP error

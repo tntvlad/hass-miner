@@ -1,5 +1,6 @@
 """Config flow for Miner."""
 
+import asyncio
 import logging
 from importlib.metadata import version
 
@@ -24,6 +25,7 @@ from .const import (
     CONF_MAX_POWER,
     CONF_MIN_POWER,
     CONF_RPC_PASSWORD,
+    CONF_SCAN_MINER,
     CONF_SSH_PASSWORD,
     CONF_SSH_USERNAME,
     CONF_TITLE,
@@ -31,6 +33,7 @@ from .const import (
     CONF_WEB_USERNAME,
     DOMAIN,
     PYASIC_VERSION,
+    SCAN_TIMEOUT,
 )
 
 # Lazy import - will be populated when needed
@@ -73,20 +76,33 @@ def _ensure_pyasic():
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _async_has_devices(hass: HomeAssistant) -> bool:
-    """Return if there are devices that can be discovered."""
+async def _async_scan_for_miners(hass: HomeAssistant) -> list:
+    """Scan all Home Assistant IPv4 subnets for miners.
+
+    Returns a list of detected pyasic miner objects, sorted by IP,
+    deduplicated across adapters.
+    """
     await hass.async_add_executor_job(_ensure_pyasic)
     adapters = await network.async_get_adapters(hass)
 
+    miners = []
+    seen_ips = set()
     for adapter in adapters:
         for ip_info in adapter["ipv4"]:
             local_ip = ip_info["address"]
             network_prefix = ip_info["network_prefix"]
             miner_net = MinerNetwork.from_subnet(f"{local_ip}/{network_prefix}")
-            miners = await miner_net.scan()
-            if len(miners) > 0:
-                return True
-    return False
+            for miner in await miner_net.scan():
+                if str(miner.ip) not in seen_ips:
+                    seen_ips.add(str(miner.ip))
+                    miners.append(miner)
+    miners.sort()
+    return miners
+
+
+async def _async_has_devices(hass: HomeAssistant) -> bool:
+    """Return if there are devices that can be discovered."""
+    return len(await _async_scan_for_miners(hass)) > 0
 
 
 async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
@@ -122,15 +138,20 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize."""
         self._data = {}
         self._miner = None
+        self._discovered = None
 
     async def async_step_user(self, user_input=None):
-        """Get miner IP and check if it is available."""
+        """Get miner IP and check if it is available.
+
+        An empty IP address triggers a network scan instead, letting the
+        user pick a miner from the discovered list.
+        """
         if user_input is None:
             user_input = {}
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_IP, default=user_input.get(CONF_IP, "")): str,
+                vol.Optional(CONF_IP, default=user_input.get(CONF_IP, "")): str,
                 vol.Optional(CONF_MIN_POWER, default=15): vol.All(
                     vol.Coerce(int), vol.Range(min=15, max=10000)
                 ),
@@ -143,6 +164,12 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not user_input:
             return self.async_show_form(step_id="user", data_schema=schema)
 
+        self._data.update(user_input)
+
+        if not user_input.get(CONF_IP, "").strip():
+            # No IP entered - scan the network for miners.
+            return await self.async_step_scan()
+
         errors, miner = await validate_ip_input(self.hass, user_input)
 
         if errors:
@@ -152,6 +179,80 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._miner = miner
         self._data.update(user_input)
+        return await self.async_step_login()
+
+    @staticmethod
+    def _miner_label(miner) -> str:
+        """Build a display label for a discovered miner."""
+        model = str(getattr(miner, "model", "") or "Unknown")
+        ip = str(getattr(miner, "ip", "") or "?")
+        return f"{model} ({ip})"
+
+    def _scan_schema(self):
+        """Build the miner-selection schema from discovered miners."""
+        options = [
+            {"value": str(miner.ip), "label": self._miner_label(miner)}
+            for miner in self._discovered
+        ]
+        return vol.Schema(
+            {
+                vol.Required(CONF_SCAN_MINER): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                )
+            }
+        )
+
+    async def _run_scan(self):
+        """Run the network scan with a hard overall timeout."""
+        try:
+            return await asyncio.wait_for(
+                _async_scan_for_miners(self.hass), timeout=SCAN_TIMEOUT
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            _LOGGER.warning(
+                "Network scan for miners timed out after %s seconds", SCAN_TIMEOUT
+            )
+            return []
+
+    async def async_step_scan(self, user_input=None):
+        """Scan the network for miners and let the user pick one."""
+        # First entry into the step (or a rescan requested by submitting an
+        # empty form): run the scan and present results.
+        if user_input is None or CONF_SCAN_MINER not in user_input:
+            self._discovered = await self._run_scan()
+
+            if not self._discovered:
+                # Empty schema renders a submit/back-only form so the user
+                # can retry the scan.
+                return self.async_show_form(
+                    step_id="scan",
+                    data_schema=vol.Schema({}),
+                    errors={"base": "no_miners_found"},
+                )
+
+            return self.async_show_form(step_id="scan", data_schema=self._scan_schema())
+
+        selected_ip = user_input[CONF_SCAN_MINER]
+        miner = next(
+            (
+                m
+                for m in (self._discovered or [])
+                if str(m.ip) == selected_ip
+            ),
+            None,
+        )
+        if miner is None:
+            return self.async_show_form(
+                step_id="scan",
+                data_schema=self._scan_schema(),
+                errors={"base": "invalid_selection"},
+            )
+
+        self._miner = miner
+        self._data[CONF_IP] = selected_ip
         return await self.async_step_login()
 
     async def async_step_login(self, user_input=None):
@@ -310,6 +411,22 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="title", data_schema=data_schema)
 
         self._data.update(user_input)
+
+        # Prevent duplicate entries for the same miner: prefer MAC address
+        # as stable identity, fall back to the IP.
+        mac = None
+        if hasattr(self._miner, "get_mac"):
+            try:
+                mac = await asyncio.wait_for(self._miner.get_mac(), timeout=10)
+            except (TimeoutError, asyncio.TimeoutError):
+                mac = None
+
+        if mac:
+            unique_id = str(mac).strip().lower()
+        else:
+            unique_id = f"{DOMAIN}-{self._data[CONF_IP]}"
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured()
 
         return self.async_create_entry(title=self._data[CONF_TITLE], data=self._data)
 
