@@ -220,27 +220,33 @@ async def _async_candidate_subnets(
     return candidates
 
 
-async def _async_tcp_alive(host) -> bool:
-    """Return whether anything accepts a TCP connection on the fallback port.
+async def _async_http_conversation(host, read_limit: int | None = None) -> bytes | None:
+    """Perform a minimal HTTP GET against host and return the response head.
 
-    Unlike pyasic's probe this tolerates an abrupt close: esp-miner devices
-    (BitAxe/NerdMiner families) accept the connection and reset it because no
-    data follows, which pyasic misclassifies as "refused" - without this
-    second chance those miners are never discovered even though they serve
-    their API on port 80.
+    Sending a real request matters: esp-miner devices (BitAxe/NerdMiner)
+    reset bare connections that carry no data - which is how pyasic's
+    connect-and-close probe loses them - while a connection with a request
+    in flight is served normally. Returns None when the host is unreachable,
+    times out, or closes without any response bytes.
     """
     try:
-        _, writer = await asyncio.wait_for(
+        reader, writer = await asyncio.wait_for(
             asyncio.open_connection(str(host), SCAN_HTTP_PORT),
             timeout=SCAN_HTTP_TIMEOUT,
         )
     except Exception:
-        return False
+        return None
+    try:
+        writer.write(b"GET / HTTP/1.0\r\nHost: miner-scan\r\nUser-Agent: hass-miner\r\n\r\n")
+        await writer.drain()
+        return await asyncio.wait_for(reader.read(read_limit or 64), timeout=SCAN_HTTP_TIMEOUT)
+    except Exception:
+        return None
+    finally:
         writer.close()
-        # A reset here still proves a listener existed - ignore it.
+        # A reset here still proves the exchange happened - ignore it.
         with contextlib.suppress(Exception):
             await writer.wait_closed()
-        return True
 
 
 async def _async_scan_for_miners(
@@ -297,16 +303,17 @@ async def _async_scan_for_miners(
                 pyasic_result = "none"
             except Exception as err:  # noqa: BLE001 - probe must never abort the sweep
                 pyasic_result = f"error: {type(err).__name__}"
-            # pyasic found nothing - recheck the HTTP port ourselves. This
-            # union signal recovers esp-miner devices (BitAxe/NerdMiner)
-            # whose abrupt close pyasic misclassifies as "refused".
-            alive = await _async_tcp_alive(host)
+            # pyasic found nothing - talk HTTP ourselves. This union signal
+            # recovers esp-miner devices (BitAxe/NerdMiner), which reset bare
+            # connect-and-close probes and are therefore invisible to pyasic.
+            response = await _async_http_conversation(host, read_limit=512)
+            alive = bool(response)
             if watched:
                 _LOGGER.info(
-                    "Probe detail for configured %s: pyasic=%s, tcp80=%s",
+                    "Probe detail for configured %s: pyasic=%s, http80=%s",
                     host_str,
                     pyasic_result,
-                    "open" if alive else "closed",
+                    "answered" if alive else "no answer",
                 )
             if not alive:
                 return None
@@ -322,6 +329,13 @@ async def _async_scan_for_miners(
                 return None
             if miner is not None:
                 stats["identified"] += 1
+                return miner
+            snippet = " ".join(response.decode("ascii", errors="replace").split())[:120]
+            _LOGGER.info(
+                "Device at %s serves HTTP but pyasic cannot identify it; response head: %s",
+                host_str,
+                snippet or "<empty>",
+            )
             return miner
 
     miners = []

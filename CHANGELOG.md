@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0-beta7 (2026-08-22)
+
+- **Reliable BitAxe discovery** — esp-miner devices reset bare TCP connections that carry no data, so both pyasic's probe and a plain connect test lost them intermittently (found on 1 of 4 scans). The fallback now sends a real HTTP GET; a connection with a request in flight is served normally, making detection deterministic.
+- **Unidentified-device banner** — hosts that answer HTTP but which pyasic cannot identify log the first bytes of their response (e.g. NerdMiner firmware pages), providing exact evidence for adding support.
+
 ## v1.4.0-beta6 (2026-08-22)
 
 - **Stronger BitAxe/NerdMiner recovery** — the port-80 liveness check now runs for every host pyasic cannot identify, instead of only after a specific failure mode; anything serving HTTP is explicitly identified via pyasic.
