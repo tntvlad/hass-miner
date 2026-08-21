@@ -63,6 +63,12 @@ SCAN_TIMEOUT = 120
 # otherwise create tens of thousands of ping tasks and can OOM small hosts.
 MAX_SCAN_HOSTS = 1024
 
+# Max simultaneous host probes during a network scan. pyasic skips its own
+# semaphore when network_scan_semaphore is unset (its default), so the config
+# flow enforces the bound itself - unbounded probes can exhaust file
+# descriptors on /22-sized sweeps.
+MAX_SCAN_CONCURRENCY = 255
+
 # pyasic network_ping_timeout override while scanning (default 3 s). Sweeping
 # a /24 with dead IPs is ~3x faster at 1 s and miners answer well within it.
 SCAN_PING_TIMEOUT = 1

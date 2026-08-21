@@ -35,6 +35,7 @@ from .const import (
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     DOMAIN,
+    MAX_SCAN_CONCURRENCY,
     MAX_SCAN_HOSTS,
     PYASIC_VERSION,
     SCAN_PING_TIMEOUT,
@@ -203,8 +204,9 @@ async def _async_scan_for_miners(
     """Scan candidate networks for miners.
 
     Returns a list of detected pyasic miner objects, sorted by IP and
-    deduplicated across networks. Each subnet is scanned independently so a
-    single failure cannot abort discovery.
+    deduplicated across networks. Hosts are probed through our own semaphore
+    (pyasic skips its built-in one by default) and every probe result is
+    isolated so a single misbehaving host cannot abort its subnet scan.
     """
     await hass.async_add_executor_job(_ensure_pyasic)
 
@@ -216,15 +218,36 @@ async def _async_scan_for_miners(
     old_ping_timeout = pyasic.settings.get("network_ping_timeout", 3)
     pyasic.settings.update("network_ping_timeout", SCAN_PING_TIMEOUT)
 
+    probe_semaphore = asyncio.Semaphore(MAX_SCAN_CONCURRENCY)
+
+    async def _probe_host(miner_net_, host):
+        async with probe_semaphore:
+            return await miner_net_.ping_and_get_miner(host)
+
     miners = []
     seen_ips = set()
     try:
         for subnet in subnets:
             try:
-                found = await MinerNetwork.from_subnet(str(subnet)).scan()
+                miner_net = MinerNetwork(list(subnet.hosts()))
+                results = await asyncio.gather(
+                    *(_probe_host(miner_net, host) for host in miner_net.hosts),
+                    return_exceptions=True,
+                )
             except Exception:
                 _LOGGER.warning("Scanning %s failed", subnet, exc_info=True)
                 continue
+            probe_errors = [r for r in results if isinstance(r, BaseException)]
+            found = [
+                r for r in results if r is not None and not isinstance(r, BaseException)
+            ]
+            if probe_errors:
+                _LOGGER.warning(
+                    "Scanning %s: %d of %d host probe(s) failed",
+                    subnet,
+                    len(probe_errors),
+                    len(results),
+                )
             new_miners = [m for m in found if str(m.ip) not in seen_ips]
             seen_ips.update(str(m.ip) for m in new_miners)
             miners.extend(new_miners)
@@ -305,9 +328,24 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._data.update(user_input)
 
-        if not user_input.get(CONF_IP, "").strip():
+        entered_value = user_input.get(CONF_IP, "").strip()
+
+        if not entered_value:
             # No IP entered - scan the network for miners.
             self._custom_net = None
+            self._scan_done = False
+            return await self.async_step_scan()
+
+        if "/" in entered_value:
+            # A CIDR range in the IP field means "scan this range" - saves a
+            # round-trip through the empty-IP flow for users who know their
+            # subnet. Bare IPs fall through to the connect check.
+            custom_net, cidr_error = _validate_custom_cidr(entered_value)
+            if cidr_error:
+                return self.async_show_form(
+                    step_id="user", data_schema=schema, errors={"base": cidr_error}
+                )
+            self._custom_net = custom_net
             self._scan_done = False
             return await self.async_step_scan()
 
@@ -348,11 +386,15 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _async_scan_for_miners(self.hass, custom_net), timeout=SCAN_TIMEOUT
             )
 
-        self._scan_task = asyncio.create_task(_scan_with_timeout())
+        self._scan_task = self.hass.async_create_task(_scan_with_timeout())
         self._scan_task.add_done_callback(self._log_scan_exception)
         return self.async_show_progress(
             step_id="scan",
             progress_action="scan_network",
+            # Required by HA: lets the flow manager track and cancel the task
+            # if the user dismisses the dialog mid-scan. Without it the scan
+            # can be orphaned and never resurfaces.
+            progress_task=self._scan_task,
         )
 
     async def async_step_scan(self, user_input=None):

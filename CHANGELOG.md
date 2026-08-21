@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0-beta3 (2026-08-21)
+
+- **Fix scan flow stalling / orphaned scans** — the progress screen now passes its backing task to Home Assistant (`progress_task`), as current HA requires. Without it HA logged a warning and the scan could silently die when the dialog was dismissed, leaving "no miner found".
+- **Hardened sweeps** — host probes run through a bounded semaphore (pyasic skips its own by default, so large ranges could open thousands of simultaneous connections) and each probe is exception-isolated: one misbehaving host can no longer abort or zero out a whole subnet's results.
+- **CIDR in the IP field** — typing a range like `192.168.1.0/24` directly into the IP field now starts a scan of that range; invalid/oversized ranges show a clear error instead of "Unable to connect".
+
 ## v1.4.0-beta2 (2026-08-21)
 
 - **Fix scan crash / HA restart** — discovery no longer scans internal networks (docker bridges, Tailscale/CGNAT, link-local, loopback) or any range larger than 1024 addresses; sweeping those could exhaust memory and take Home Assistant down. Malformed adapter data and per-subnet failures are now contained and logged instead of surfacing as "Unknown error occurred".
