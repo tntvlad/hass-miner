@@ -3,8 +3,12 @@
 import asyncio
 import contextlib
 import ipaddress
+import json
 import logging
+import time
+from functools import lru_cache
 from importlib.metadata import version
+from pathlib import Path
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -83,6 +87,20 @@ def _ensure_pyasic():
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _integration_version() -> str:
+    """Read the integration version from manifest.json for scan diagnostics.
+
+    Stamped into scan log lines so a submitted log unambiguously shows which
+    build produced them (HACS updates only take effect after an HA restart).
+    """
+    try:
+        with open(Path(__file__).parent / "manifest.json") as f:
+            return str(json.load(f).get("version", "?"))
+    except Exception:
+        return "?"
 
 # Ranges that never contain user miners: unspecified, loopback, link-local,
 # CGNAT (Tailscale/VPN), multicast/reserved. Scanning them wastes time and
@@ -245,6 +263,15 @@ async def _async_scan_for_miners(
     pyasic.settings.update("network_ping_timeout", SCAN_PING_TIMEOUT)
 
     probe_semaphore = asyncio.Semaphore(MAX_SCAN_CONCURRENCY)
+    scan_started = time.monotonic()
+    _LOGGER.info(
+        "Network scan starting (integration %s)", _integration_version()
+    )
+
+    # Counters for the per-subnet log line - they make the port-80 recheck
+    # visible in submitted logs (alive-but-unidentified hosts point at
+    # unsupported esp-miner firmware).
+    stats = {"rechecked": 0, "identified": 0}
 
     async def _probe_host(miner_net_, host):
         async with probe_semaphore:
@@ -259,8 +286,9 @@ async def _async_scan_for_miners(
             # ourselves and identify the device explicitly.
             if not await _async_tcp_alive(host):
                 return None
+            stats["rechecked"] += 1
             try:
-                return await asyncio.wait_for(
+                miner = await asyncio.wait_for(
                     pyasic.get_miner(str(host)), timeout=SCAN_IDENTIFY_TIMEOUT
                 )
             except Exception:
@@ -268,6 +296,9 @@ async def _async_scan_for_miners(
                     "Could not identify %s despite an open port", host, exc_info=True
                 )
                 return None
+            if miner is not None:
+                stats["identified"] += 1
+            return miner
 
     miners = []
     seen_ips = set()
@@ -296,9 +327,28 @@ async def _async_scan_for_miners(
             new_miners = [m for m in found if str(m.ip) not in seen_ips]
             seen_ips.update(str(m.ip) for m in new_miners)
             miners.extend(new_miners)
-            _LOGGER.info("Scanned %s: found %d miner(s)", subnet, len(new_miners))
+            _LOGGER.info(
+                "Scanned %s: found %d miner(s) (port-80 recheck: %d alive, %d identified)",
+                subnet,
+                len(new_miners),
+                stats["rechecked"],
+                stats["identified"],
+            )
     finally:
         pyasic.settings.update("network_ping_timeout", old_ping_timeout)
+
+    _LOGGER.info(
+        "Network scan finished in %.1fs: %d miner(s) across %d subnet(s)",
+        time.monotonic() - scan_started,
+        len(miners),
+        len(subnets),
+    )
+    for miner in miners:
+        _LOGGER.info(
+            "Discovered miner: %s (%s)",
+            getattr(miner, "model", "?"),
+            getattr(miner, "ip", "?"),
+        )
 
     miners.sort()
     return miners

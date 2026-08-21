@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.0-beta5 (2026-08-22)
+
+- **Scan diagnostics** — scan log lines are now stamped with the integration version and report port-80 recheck statistics and a per-miner summary, so submitted logs unambiguously show which build ran and whether the BitAxe/NerdMiner fallback engaged. (HACS updates only take effect after restarting Home Assistant - if you updated without a restart you were still on the previous version.)
+
 ## v1.4.0-beta4 (2026-08-22)
 
 - **Discovery now finds BitAxe / NerdMiner** — esp-miner devices accept the scan's TCP probe and then reset the connection, which pyasic misreads as "refused" and skips; the Gamma at 192.168.1.92 was therefore never offered despite answering every poll. After pyasic's probe reports nothing, the integration now re-checks port 80 itself (tolerating the reset) and identifies the device explicitly.
