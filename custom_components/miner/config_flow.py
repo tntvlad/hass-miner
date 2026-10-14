@@ -13,8 +13,12 @@ from pathlib import Path
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import network
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import OptionsFlowWithReload
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -37,12 +41,16 @@ from .const import (
     CONF_SSH_PASSWORD,
     CONF_SSH_USERNAME,
     CONF_TITLE,
+    CONF_UPDATE_INTERVAL,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MAX_RETRY_HOSTS,
     MAX_SCAN_CONCURRENCY,
     MAX_SCAN_HOSTS,
+    MAX_UPDATE_INTERVAL,
+    MIN_UPDATE_INTERVAL,
     PYASIC_VERSION,
     SCAN_HTTP_PORT,
     SCAN_HTTP_TIMEOUT,
@@ -500,6 +508,14 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._scan_done = False
         self._custom_net = None
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> "MinerOptionsFlow":
+        """Return the options flow for this config entry."""
+        return MinerOptionsFlow()
+
     async def async_step_user(self, user_input=None):
         """Get miner IP and check if it is available.
 
@@ -868,3 +884,45 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_devices_found")
 
         return await self.async_step_user()
+
+
+class MinerOptionsFlow(OptionsFlowWithReload):
+    """Handle the Miner options flow.
+
+    Currently exposes a single tunable: how often the coordinator polls the
+    miner. Every entity (board/chip temperatures, hashrate, power, fans, ...)
+    refreshes on this cadence. Saving reloads the config entry, so the new
+    interval is applied by a freshly built coordinator.
+    """
+
+    async def async_step_init(self, user_input=None):
+        """Manage the Miner options."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_UPDATE_INTERVAL: int(user_input[CONF_UPDATE_INTERVAL])}
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_UPDATE_INTERVAL): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_UPDATE_INTERVAL,
+                        max=MAX_UPDATE_INTERVAL,
+                        step=1,
+                        unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                {
+                    CONF_UPDATE_INTERVAL: self.config_entry.options.get(
+                        CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+                    )
+                },
+            ),
+        )

@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.0-beta9 (2026-10-14)
+
+- **Configurable refresh interval** — the miner's **Configure** dialog (Settings → Devices & Services → miner → Configure) now exposes a *Refresh interval* in seconds (5–3600, default 60), replacing the hard-coded 60 s poll. Every entity, including board and chip temperatures, refreshes on this cadence. The setting is per miner and saving it reloads the config entry immediately — no restart needed.
+
 ## v1.4.0-beta8 (2026-08-22)
 
 - **Gentle retry pass for WiFi miners** — the BitAxe/NerdMiner are WiFi-only ESP32 devices whose tiny stacks drop probes while a 254-host sweep saturates them (found on only 1 of 4 scans). Hosts that stay *silently* unresponsive during the main sweep are now re-probed calmly seconds later, when they answer reliably. Definitively-refused hosts are not retried, keeping the extra time to a few seconds.

@@ -13,6 +13,13 @@ CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 
+# User-configurable poll interval (config-entry option). Every entity -
+# including board and chip temperatures - refreshes on this cadence.
+CONF_UPDATE_INTERVAL = "update_interval"
+DEFAULT_UPDATE_INTERVAL = 60  # seconds; matches the original hard-coded value
+MIN_UPDATE_INTERVAL = 5
+MAX_UPDATE_INTERVAL = 3600
+
 # Config-flow key for the network-scan step: holds the IP of the miner the
 # user picked from the discovered list.
 CONF_SCAN_MINER = "scan_miner"

@@ -65,6 +65,20 @@
       "already_configured": "[%key:common::config_flow::abort::already_configured%]"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Miner options",
+        "description": "How often Home Assistant polls this miner. Lower is fresher but puts more load on the miner.",
+        "data": {
+          "update_interval": "Refresh interval"
+        },
+        "data_description": {
+          "update_interval": "Seconds between polls (5-3600). Default 60."
+        }
+      }
+    }
+  },
   "services": {
     "reboot": {
       "name": "Reboot miner",
