@@ -26,8 +26,10 @@ from .const import (
     CONF_RPC_PASSWORD,
     CONF_SSH_PASSWORD,
     CONF_SSH_USERNAME,
+    CONF_UPDATE_INTERVAL,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
+    DEFAULT_UPDATE_INTERVAL,
     MINER_DETECTION_TIMEOUT,
     TRANSIENT_FAILURE_GRACE,
 )
@@ -1122,7 +1124,11 @@ class MinerCoordinator(DataUpdateCoordinator):
             logger=_LOGGER,
             config_entry=entry,
             name=entry.title,
-            update_interval=timedelta(seconds=60),
+            update_interval=timedelta(
+                seconds=entry.options.get(
+                    CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+                )
+            ),
             request_refresh_debouncer=Debouncer(
                 hass,
                 _LOGGER,

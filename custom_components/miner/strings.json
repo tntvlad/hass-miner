@@ -3,10 +3,26 @@
   "config": {
     "step": {
       "user": {
+        "description": "Enter the IP address of your miner, or leave it empty to scan your network for miners.",
         "data": {
           "ip": "[%key:common::config_flow::data::ip%]",
           "min_power": "[%key:common::config_flow::data::min_power%]",
           "max_power": "[%key:common::config_flow::data::max_power%]"
+        }
+      },
+      "scan": {
+        "description": "Scanning your network for miners. This can take up to two minutes."
+      },
+      "scan_result": {
+        "title": "Scan Results",
+        "description": "Select a discovered miner to continue, or adjust the options and scan again.",
+        "data": {
+          "scan_miner": "Discovered miner",
+          "scan_network": "Network range (optional)",
+          "rescan": "Scan again"
+        },
+        "data_description": {
+          "scan_network": "CIDR range to scan, e.g. 192.168.1.0/24. Useful on Home Assistant OS, where automatic detection cannot see your LAN because HA runs in an internal container network."
         }
       },
       "login": {
@@ -34,10 +50,33 @@
         }
       }
     },
+    "error": {
+      "no_miners_found": "No miners were found on your network. Scan again, optionally entering your network range below.",
+      "invalid_selection": "The selected miner could no longer be found. Scan again.",
+      "invalid_cidr": "Invalid network range. Use CIDR notation, e.g. 192.168.1.0/24.",
+      "cidr_too_large": "Network range is too large to scan (max 1024 addresses)."
+    },
+    "progress": {
+      "scan_network": "Scanning your network for miners…"
+    },
     "abort": {
       "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
       "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
       "already_configured": "[%key:common::config_flow::abort::already_configured%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Miner options",
+        "description": "How often Home Assistant polls this miner. Lower is fresher but puts more load on the miner.",
+        "data": {
+          "update_interval": "Refresh interval"
+        },
+        "data_description": {
+          "update_interval": "Seconds between polls (5-3600). Default 60."
+        }
+      }
     }
   },
   "services": {

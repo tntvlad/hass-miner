@@ -13,6 +13,25 @@ CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 CONF_AVALON_CONTROL_MODE = "avalon_control_mode"
 
+# User-configurable poll interval (config-entry option). Every entity -
+# including board and chip temperatures - refreshes on this cadence.
+CONF_UPDATE_INTERVAL = "update_interval"
+DEFAULT_UPDATE_INTERVAL = 60  # seconds; matches the original hard-coded value
+MIN_UPDATE_INTERVAL = 5
+MAX_UPDATE_INTERVAL = 3600
+
+# Config-flow key for the network-scan step: holds the IP of the miner the
+# user picked from the discovered list.
+CONF_SCAN_MINER = "scan_miner"
+
+# Optional CIDR (e.g. 192.168.1.0/24) the user can enter to point the scan at
+# a specific range - needed on Home Assistant OS, where HA runs in a container
+# on an internal bridge and adapter-derived subnets never contain the LAN.
+CONF_SCAN_NETWORK = "scan_network"
+
+# Checkbox on the scan-result form to re-run the scan.
+CONF_RESCAN = "rescan"
+
 # Config-entry data key for the device profile captured on the last successful
 # update (identity, capabilities, firmware-type flags). Lets the integration
 # set up while the miner is powered off (e.g. for energy saving) instead of
@@ -38,6 +57,50 @@ PYASIC_VERSION = "0.78.12"
 # comfortably above that - too small a value spuriously times out valid miners
 # during setup, leaving the config entry stuck in setup_retry.
 MINER_DETECTION_TIMEOUT = 45
+
+# Hard timeout (seconds) for a whole network scan in the config flow. pyasic
+# pings every host of each adapter subnet (255 hosts on a /24, 3s ping
+# timeout) and then runs miner detection on responders; this comfortably fits
+# the slowest realistic case while still bounding how long the config-flow
+# form can hang.
+SCAN_TIMEOUT = 120
+
+# Networks larger than this (in addresses) are never scanned - internal
+# docker/VPN bridges (e.g. 172.17.0.0/16 or Tailscale's 100.64.0.0/10) would
+# otherwise create tens of thousands of ping tasks and can OOM small hosts.
+MAX_SCAN_HOSTS = 1024
+
+# Max simultaneous host probes during a network scan. pyasic skips its own
+# semaphore when network_scan_semaphore is unset (its default), so the config
+# flow enforces the bound itself - unbounded probes can exhaust file
+# descriptors on /22-sized sweeps.
+MAX_SCAN_CONCURRENCY = 255
+
+# pyasic network_ping_timeout override while scanning (default 3 s). Sweeping
+# a /24 with dead IPs is ~3x faster at 1 s and miners answer well within it.
+SCAN_PING_TIMEOUT = 1
+
+# Port probed as a fallback when pyasic's own probe reports nothing: all
+# esp-miner HTTP devices (BitAxe, NerdMiner) serve their API on port 80.
+SCAN_HTTP_PORT = 80
+
+# Connect timeout (seconds) for the integration's own port-80 liveness check.
+# Slightly above the ping timeout because embedded HTTP servers can accept
+# slowly under load; probes run concurrently so this adds no wall time.
+SCAN_HTTP_TIMEOUT = 2
+
+# Per-host cap (seconds) for identifying a device that pyasic's probe missed
+# but which answers on the fallback port. Bounds worst-case sweeps over LANs
+# with many non-miner devices running web UIs (routers, printers).
+SCAN_IDENTIFY_TIMEOUT = 30
+
+# The gentle retry pass: WiFi miners (BitAxe/NerdMiner) routinely drop probes
+# while a sweep's connection storm saturates their tiny stacks, then answer
+# normally seconds later. Hosts that stayed silently unresponsive ("drowsy")
+# are re-probed politely once the storm has passed.
+SCAN_RETRY_TIMEOUT = 5
+SCAN_RETRY_CONCURRENCY = 16
+MAX_RETRY_HOSTS = 64
 
 # Number of consecutive update failures absorbed by returning last-known-good
 # data before UpdateFailed is raised. One flaky poll (transient API/HTTP error

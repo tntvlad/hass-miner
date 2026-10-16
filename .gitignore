@@ -22,6 +22,10 @@ config/*
 # Downloaded pyasic source for analysis
 pyasic/
 
+# Agent instructions (local only)
+AGENTS.md
+agents.md
+
 # Log files
 logs/
 # HAR files for API analysis (may contain sensitive data)
