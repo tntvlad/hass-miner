@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.4.0 (2026-10-16)
+
+First stable release of the 1.4.0 line. Consolidates the v1.4.0-beta1 … beta9
+work below into a single release; no changes since v1.4.0-beta9.
+
+**Highlights**
+
+- **Network scan for miners** — leave the IP field empty during setup and the
+  integration sweeps the local subnet(s) and offers what it finds in a dropdown.
+  Scans are bounded by a 120 s timeout, reject internal/oversized ranges, and can
+  be re-run if nothing is found.
+- **Reliable BitAxe / NerdMiner discovery** — esp-miner devices reset bare TCP
+  probes, so port 80 is re-checked with a real HTTP GET and silently
+  unresponsive hosts get a gentle retry pass; both were intermittent misses before.
+- **HAOS-aware discovery** — candidate ranges are also derived from
+  already-configured miner IPs, and an optional *Network range* field (CIDR) lets
+  you point the scan anywhere.
+- **Configurable refresh interval** — the **Configure** dialog exposes a
+  *Refresh interval* (5–3600 s, default 60) per miner; saving reloads the entry
+  immediately, no restart required.
+- **Duplicate protection** — config entries carry a unique ID (MAC address, IP
+  fallback), so the same miner can no longer be added twice.
+- **Resilience** — transient poll failures keep last-known-good data, entities
+  go unavailable only after 3 consecutive failures, and offline miners can be set
+  up from a cached profile.
+- **Scan diagnostics** — scan log lines are version-stamped and report port-80
+  recheck statistics and per-miner summaries, so submitted logs are actionable.
+
 ## v1.4.0-beta9 (2026-10-14)
 
 - **Configurable refresh interval** — the miner's **Configure** dialog (Settings → Devices & Services → miner → Configure) now exposes a *Refresh interval* in seconds (5–3600, default 60), replacing the hard-coded 60 s poll. Every entity, including board and chip temperatures, refreshes on this cadence. The setting is per miner and saving it reloads the config entry immediately — no restart needed.
