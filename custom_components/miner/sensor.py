@@ -108,6 +108,13 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
+    "frequency": SensorEntityDescription(
+        key="Chip Frequency",
+        native_unit_of_measurement="MHz",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:sine-wave",
+    ),
     "hashrate": SensorEntityDescription(
         key="Hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
@@ -306,9 +313,9 @@ async def async_setup_entry(
                     )
                 )
 
-    # Add BitAxe-specific sensors (Best Share, Found Blocks)
+    # Add BitAxe-specific sensors (Best Share, Found Blocks, Chip Frequency)
     if _is_bitaxe_miner(miner) or (offline and profile.get("is_bitaxe", False)):
-        for sensor_key in ["best_share", "found_blocks"]:
+        for sensor_key in ["best_share", "found_blocks", "frequency"]:
             description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor_key)
             if description:
                 sensors.append(
@@ -678,6 +685,8 @@ class BitAxeSensor(CoordinatorEntity[MinerCoordinator], SensorEntity):
             return self.coordinator.data.get("bitaxe_best_share")
         elif self._sensor == "found_blocks":
             return self.coordinator.data.get("bitaxe_found_blocks")
+        elif self._sensor == "frequency":
+            return self.coordinator.data.get("bitaxe_frequency")
         return None
 
     @property

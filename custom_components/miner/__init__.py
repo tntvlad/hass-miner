@@ -63,6 +63,7 @@ def _ensure_pyasic():
         # Apply patches after pyasic is loaded
         from .patch import (
             apply_avalonminer_web_patch,
+            apply_nerdqaxe_patch,
             apply_vnish_get_config_patch,
             apply_whatsminer_power_limit_patch,
         )
@@ -70,6 +71,7 @@ def _ensure_pyasic():
         apply_whatsminer_power_limit_patch()
         apply_avalonminer_web_patch()
         apply_vnish_get_config_patch()
+        apply_nerdqaxe_patch()
         return pyasic
 
     # Need to install/reinstall
@@ -91,6 +93,7 @@ def _ensure_pyasic():
     # Apply patches after fresh install
     from .patch import (
         apply_avalonminer_web_patch,
+        apply_nerdqaxe_patch,
         apply_vnish_get_config_patch,
         apply_whatsminer_power_limit_patch,
     )
@@ -98,6 +101,7 @@ def _ensure_pyasic():
     apply_whatsminer_power_limit_patch()
     apply_avalonminer_web_patch()
     apply_vnish_get_config_patch()
+    apply_nerdqaxe_patch()
 
     return pyasic
 

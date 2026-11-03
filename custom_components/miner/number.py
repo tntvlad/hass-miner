@@ -27,6 +27,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import CONF_WEB_PASSWORD, CONF_WEB_USERNAME, DOMAIN
 from .coordinator import (
     MinerCoordinator,
+    _is_bitaxe_miner,
     _is_bos_miner,
     _is_vnish_miner,
     _set_vnish_overclock,
@@ -112,6 +113,10 @@ async def async_setup_entry(
         ):
             vnish_entities.append(VNishThrottleNumber(coordinator=coordinator))
         async_add_entities(vnish_entities)
+
+    # Add BitAxe/ESP-Miner chip frequency control
+    if _is_bitaxe_miner(miner) or (offline and profile.get("is_bitaxe", False)):
+        async_add_entities([BitAxeFrequencyNumber(coordinator=coordinator)])
 
 
 class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
@@ -795,6 +800,87 @@ class VNishThrottleNumber(_VNishOverclockBase):
         if not success:
             _LOGGER.error(
                 "%s: failed to set VNish throttle to %s%%",
+                self.coordinator.config_entry.title, value
+            )
+        await self.coordinator.async_request_refresh()
+
+
+class BitAxeFrequencyNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
+    """Number entity to control BitAxe/ESP-Miner chip frequency (MHz)."""
+
+    @property
+    def name(self) -> str:
+        """Return entity name."""
+        return f"{self.coordinator.config_entry.title} Frequency"
+
+    @property
+    def unique_id(self) -> str:
+        """Return unique entity id."""
+        return f"{self.coordinator.config_entry.entry_id}-bitaxe-frequency"
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        """Return device info."""
+        mac = self.coordinator.data.get("mac")
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            connections={(device_registry.CONNECTION_NETWORK_MAC, mac)} if mac else set(),
+            configuration_url=f"http://{self.coordinator.data['ip']}",
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current chip frequency."""
+        return self.coordinator.data.get("bitaxe_frequency")
+
+    @property
+    def native_min_value(self) -> float:
+        """Return device minimum frequency."""
+        return self.coordinator.data.get("bitaxe_min_frequency") or 500
+
+    @property
+    def native_max_value(self) -> float:
+        """Return device maximum frequency."""
+        return self.coordinator.data.get("bitaxe_max_frequency") or 800
+
+    @property
+    def native_step(self) -> float:
+        """Return step size."""
+        return 1
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return unit of measurement."""
+        return "MHz"
+
+    @property
+    def icon(self) -> str:
+        """Return icon."""
+        return "mdi:sine-wave"
+
+    @property
+    def entity_category(self):
+        """Return entity category."""
+        return EntityCategory.CONFIG
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available or not."""
+        return (
+            self.coordinator.available
+            and self.coordinator.data.get("bitaxe_frequency") is not None
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set new frequency value (reboots the miner to apply it)."""
+        success = await self.coordinator.async_set_bitaxe_frequency(int(value))
+        if not success:
+            _LOGGER.error(
+                "%s: failed to set frequency to %s MHz",
                 self.coordinator.config_entry.title, value
             )
         await self.coordinator.async_request_refresh()

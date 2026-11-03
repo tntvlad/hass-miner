@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.4.1-b1 (2026-11-03)
+
+Beta 1 of the 1.4.1 line.
+
+**Highlights**
+
+- **NerdQAxe++ (ESP-Miner) support** — devices whose web UI titles the page
+  "Nerd* Dashboard" are now detected and handled as BitAxe miners (previously
+  `get_miner()` returned None and the miner could not be added at all).
+- **BitAxe/ESP-Miner chip frequency control** — a new *Frequency* number entity
+  (MHz) sets the chip frequency via the device API and reboots the miner to
+  apply it; min/max bounds are fetched from `/api/system/asic`. A matching
+  *Chip Frequency* diagnostic sensor was added.
+- **HACS icon** — added an integration icon/logo for the HACS store listing.
+
+
 ## v1.4.0 (2026-10-16)
 
 First stable release of the 1.4.0 line. Consolidates the v1.4.0-beta1 … beta9
