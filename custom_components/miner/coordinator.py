@@ -79,6 +79,9 @@ DEFAULT_DATA = {
     "bos_found_blocks": None,
     "bitaxe_best_share": None,
     "bitaxe_found_blocks": None,
+    "bitaxe_frequency": None,
+    "bitaxe_min_frequency": None,
+    "bitaxe_max_frequency": None,
 }
 
 
@@ -690,11 +693,41 @@ async def _fetch_bitaxe_summary(ip: str, timeout: int = 10) -> dict | None:
             result = {}
             if "bestDiff" in data:
                 result["best_share"] = data["bestDiff"]
-            if "blockFound" in data:
+            if data.get("blockFound") is not None:
                 result["found_blocks"] = int(data["blockFound"])
+            if data.get("frequency") is not None:
+                result["frequency"] = int(data["frequency"])
             return result if result else None
     except Exception as e:
         _LOGGER.debug("BitAxe %s: failed to fetch system/info: %s", ip, e)
+    return None
+
+
+async def _fetch_bitaxe_asic(ip: str, timeout: int = 10) -> dict | None:
+    """Fetch ASIC frequency limits from BitAxe via /api/system/asic."""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session, session.get(
+            f"http://{ip}/api/system/asic",
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.debug(
+                    "BitAxe %s: system/asic failed with status %s", ip, resp.status
+                )
+                return None
+            data = await resp.json(content_type=None)
+            options = data.get("frequencyOptions") or []
+            max_freq = data.get("absMaxFrequency") or (
+                max(options) if options else None
+            )
+            return {
+                "min_frequency": options[0] if options else None,
+                "max_frequency": max_freq,
+            }
+    except Exception as e:
+        _LOGGER.debug("BitAxe %s: failed to fetch system/asic: %s", ip, e)
     return None
 
 
@@ -1119,6 +1152,9 @@ class MinerCoordinator(DataUpdateCoordinator):
         # True while running on cached-profile data because the miner was
         # unreachable during setup; cleared on the first successful update.
         self._primed_offline = False
+        # BitAxe/ESP-Miner ASIC frequency bounds (static for the run; fetched
+        # once on the first successful poll).
+        self._bitaxe_freq_limits: dict = {}
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -1290,6 +1326,24 @@ class MinerCoordinator(DataUpdateCoordinator):
         if getattr(miner, "model", None):
             self.miner = miner
         return miner
+
+    async def async_set_bitaxe_frequency(self, frequency: int) -> bool:
+        """Set chip frequency on a BitAxe/ESP-Miner device.
+
+        ESP-Miner persists the value via PATCH /api/system but only applies it
+        after a restart, so the miner is rebooted here.
+        """
+        if self.miner is None:
+            return False
+        try:
+            await self.miner.web.update_settings(frequency=int(frequency))
+            await self.miner.reboot()
+            return True
+        except Exception as e:
+            _LOGGER.error(
+                "%s: failed to set frequency to %s MHz: %s", self.name, frequency, e
+            )
+            return False
 
     async def _async_update_data(self):
         """Fetch sensors from miners."""
@@ -1669,6 +1723,18 @@ class MinerCoordinator(DataUpdateCoordinator):
             if bitaxe_summary:
                 data["bitaxe_best_share"] = bitaxe_summary.get("best_share")
                 data["bitaxe_found_blocks"] = bitaxe_summary.get("found_blocks")
+                data["bitaxe_frequency"] = bitaxe_summary.get("frequency")
+
+            if not self._bitaxe_freq_limits:
+                self._bitaxe_freq_limits = (
+                    await _fetch_bitaxe_asic(self.miner.ip) or {}
+                )
+            data["bitaxe_min_frequency"] = self._bitaxe_freq_limits.get(
+                "min_frequency"
+            )
+            data["bitaxe_max_frequency"] = self._bitaxe_freq_limits.get(
+                "max_frequency"
+            )
 
         # Cache identity/capabilities so the next setup can succeed while the
         # miner is powered off (see prime_from_cached_profile).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import site
@@ -297,4 +298,95 @@ def apply_vnish_get_config_patch():
 
     except Exception as e:
         _PATCH_LOGGER.warning(f"Failed to apply VNish get_config patch: {e}")
+        return False
+
+
+def apply_nerdqaxe_patch():
+    """Teach pyasic about NerdQAxe (ESP-Miner) devices.
+
+    The NerdQAxe++ runs ESP-Miner firmware, but its web UI titles the page
+    "Nerd* Dashboard" instead of "AxeOS", so pyasic's factory never matches
+    it and get_miner() returns None - the miner cannot be added at all.
+    Its /api/system/info is the standard ESP-Miner payload, so handle it as
+    a BitAxe with a NerdQAxe model name and both reported fans.
+    """
+    try:
+        from pyasic.data import Fan
+        from pyasic.device.models import MinerModelType
+        from pyasic.errors import APIError
+        from pyasic.miners.bitaxe import BitAxeGamma
+        from pyasic.miners.factory import MINER_CLASSES, MinerFactory, MinerTypes
+
+        if hasattr(MinerFactory, "_hass_nerdqaxe_patched"):
+            _PATCH_LOGGER.debug("NerdQAxe patch already applied")
+            return True
+
+        class NerdQAxeModel(MinerModelType):
+            """pyasic's DeviceInfo requires a MinerModelType, not a plain str."""
+
+            NERDQAXE_PP = "NerdQAxe++"
+
+            def __str__(self):
+                return self.value
+
+        class NerdQAxePP(BitAxeGamma):
+            """NerdQAxe++ - ESP-Miner firmware with a non-AxeOS web UI."""
+
+            raw_model = NerdQAxeModel.NERDQAXE_PP
+            expected_fans = 2
+
+            async def _get_fans(self, web_system_info: dict | None = None):
+                if web_system_info is None:
+                    with contextlib.suppress(APIError):
+                        web_system_info = await self.web.system_info()
+                if web_system_info is not None:
+                    fans = [
+                        Fan(speed=web_system_info[key])
+                        for key in ("fanrpm", "fanrpm2")
+                        if web_system_info.get(key) is not None
+                    ]
+                    if fans:
+                        return fans
+                return []
+
+        # Reached because get_miner_model_bitaxe() returns "NerdQAxe++" below;
+        # _select_miner_from_classes() upper-cases the key.
+        MINER_CLASSES[MinerTypes.BITAXE]["NERDQAXE++"] = NerdQAxePP
+
+        original_parse_web_type = MinerFactory._parse_web_type
+
+        def patched_parse_web_type(web_text, web_resp):
+            miner_type = original_parse_web_type(web_text, web_resp)
+            if miner_type is not None:
+                return miner_type
+            if "Nerd* Dashboard" in web_text or "NerdQAxe" in web_text:
+                return MinerTypes.BITAXE
+            return None
+
+        async def patched_get_miner_model_bitaxe(self, ip):
+            web_json_data = await self.send_web_command(ip, "/api/system/info")
+            if web_json_data is not None:
+                try:
+                    device_model = web_json_data.get("deviceModel")
+                    if (
+                        isinstance(device_model, str)
+                        and "nerd" in device_model.lower()
+                    ):
+                        return device_model
+                    miner_model = web_json_data["ASICModel"]
+                    if miner_model == "":
+                        return None
+                    return miner_model
+                except (TypeError, LookupError):
+                    pass
+            return None
+
+        MinerFactory._parse_web_type = staticmethod(patched_parse_web_type)
+        MinerFactory.get_miner_model_bitaxe = patched_get_miner_model_bitaxe
+        MinerFactory._hass_nerdqaxe_patched = True
+        _PATCH_LOGGER.info("Applied NerdQAxe patch (detection, model, fans)")
+        return True
+
+    except Exception as e:
+        _PATCH_LOGGER.warning(f"Failed to apply NerdQAxe patch: {e}")
         return False
