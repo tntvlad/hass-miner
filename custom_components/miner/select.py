@@ -9,8 +9,8 @@ from typing import Any
 
 import aiohttp
 from homeassistant.components.select import SelectEntity
-from homeassistant.components.sensor import EntityCategory
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback

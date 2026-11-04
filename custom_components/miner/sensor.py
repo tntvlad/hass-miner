@@ -5,14 +5,18 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.sensor import (
-    EntityCategory,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import REVOLUTIONS_PER_MINUTE, UnitOfPower, UnitOfTemperature
+from homeassistant.const import (
+    REVOLUTIONS_PER_MINUTE,
+    EntityCategory,
+    UnitOfPower,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback

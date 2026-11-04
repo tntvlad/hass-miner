@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.1-b2 (2026-11-04)
+
+Beta 2 of the 1.4.1 line.
+
+**Fixes**
+
+- **Home Assistant 2026.11.0 compatibility** — `EntityCategory` moved from
+  `homeassistant.components.sensor` to `homeassistant.const`; updated imports in
+  `sensor.py`, `number.py`, and `select.py` so the integration loads again on
+  HA 2026.11.0+.
+
+
 ## v1.4.1-b1 (2026-11-03)
 
 Beta 1 of the 1.4.1 line.
