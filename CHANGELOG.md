@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.1 (2026-11-04)
+
+Stable release of the 1.4.1 line. Consolidates the v1.4.1-b1 … b2 work.
+
+**Highlights**
+
+- **NerdQAxe++ (ESP-Miner) support** — devices whose web UI titles the page
+  "Nerd* Dashboard" are now detected and handled as BitAxe miners.
+- **BitAxe/ESP-Miner chip frequency control** — a new *Frequency* number entity
+  (MHz) sets the chip frequency via the device API and reboots the miner to
+  apply it; min/max bounds are fetched from `/api/system/asic`. A matching
+  *Chip Frequency* diagnostic sensor was added.
+- **HACS icon** — added an integration icon/logo for the HACS store listing.
+- **Home Assistant 2026.11.0 compatibility** — `EntityCategory` moved from
+  `homeassistant.components.sensor` to `homeassistant.const`; updated imports in
+  `sensor.py`, `number.py`, and `select.py`.
+
+
 ## v1.4.1-b2 (2026-11-04)
 
 Beta 2 of the 1.4.1 line.
