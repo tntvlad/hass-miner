@@ -28,9 +28,21 @@ class BaikalMiner:
         self.ssh = None
         self.rpc = None
 
+    async def get_hostname(self):
+        """Return hostname."""
+        return "Baikal BK-X"
+
+    async def get_mac(self):
+        """Return MAC."""
+        return None
+
     def __repr__(self):
         """Repr."""
         return f"BaikalMiner({self.ip})"
+
+    def __lt__(self, other):
+        """Less than."""
+        return str(getattr(self, "ip", "")) < str(getattr(other, "ip", ""))
 
 
 async def _sgminer_command(ip: str, command: str, timeout: int = 10):

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.2-b2 (2026-11-07)
+
+Beta 2 of the 1.4.2 line.
+
+**Fixes**
+
+- **Baikal scan + manual add** — the network scan now detects Baikal BK-X miners
+  (sgminer on port 4028) and the manual IP flow no longer errors out; added
+  `get_hostname`/`get_mac` to the Baikal sentinel and a proper `cannot_connect`
+  error key.
+
+
 ## v1.4.2-b1 (2026-11-07)
 
 Beta 1 of the 1.4.2 line.

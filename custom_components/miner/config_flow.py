@@ -328,6 +328,16 @@ async def _async_scan_for_miners(
         if miner is not None:
             stats["identified"] += 1
             return miner
+        # Fall back to Baikal BK-X (sgminer) detection on port 4028.
+        try:
+            from . import baikal as _baikal
+
+            fw = await _baikal.detect_baikal(host_str)
+            if fw is not None:
+                stats["identified"] += 1
+                return _baikal.BaikalMiner(host_str, fw)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Baikal detection failed for %s", host_str, exc_info=True)
         snippet = " ".join(response.decode("ascii", errors="replace").split())[:120]
         _LOGGER.info(
             "Device at %s serves HTTP but pyasic cannot identify it; response head: %s",
@@ -478,13 +488,16 @@ async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
     miner = await pyasic.get_miner(miner_ip)
     if miner is None:
         # Fall back to Baikal BK-X (sgminer) detection
-        from . import baikal as _baikal
+        try:
+            from . import baikal as _baikal
 
-        fw = await _baikal.detect_baikal(miner_ip)
-        if fw is not None:
-            miner = _baikal.BaikalMiner(miner_ip, fw)
+            fw = await _baikal.detect_baikal(miner_ip)
+            if fw is not None:
+                miner = _baikal.BaikalMiner(miner_ip, fw)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("Baikal detection failed for %s: %s", miner_ip, err)
     if miner is None:
-        return {"base": "Unable to connect to Miner, is IP correct?"}, None
+        return {"base": "cannot_connect"}, None
 
     return {}, miner
 
