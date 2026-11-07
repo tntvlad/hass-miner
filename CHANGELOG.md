@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.2-b4 (2026-11-07)
+
+Beta 4 of the 1.4.2 line.
+
+**Highlights**
+
+- **SplitMiner / virtual miner support** — detect and monitor SplitMiner
+  virtual miners (cgminer API on ports 4028+) via scan and manual IP entry
+  (host:port supported).
+
+
 ## v1.4.2-b3 (2026-11-07)
 
 Beta 3 of the 1.4.2 line.

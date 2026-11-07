@@ -11,22 +11,39 @@ import logging
 
 _LOGGER = logging.getLogger(__name__)
 
+# Hashboard count from the most recent sgminer "devs" reply, per IP. The
+# platform set-up code reads it off the sentinel before the next poll.
+_LAST_BOARD_COUNT: dict[str, int] = {}
+
 
 class BaikalMiner:
     """Minimal sentinel standing in for a pyasic miner object."""
 
     _baikal = True
 
-    def __init__(self, ip: str, fw_ver: str | None = None):
+    def __init__(self, ip: str, fw_ver: str | None = None, port: int = 4028):
         """Initialize."""
         self.ip = ip
+        self.port = port
         self.make = "Baikal"
         self.model = "BK-X"
+        self.raw_model = "BK-X"
         self.fw_ver = fw_ver
         self.api = None
         self.web = None
         self.ssh = None
         self.rpc = None
+        # Capability flags the entity platforms read directly off the miner
+        # object; sgminer exposes no pause/autotune control for the BK-X.
+        self.supports_shutdown = False
+        self.supports_autotuning = False
+        self.supports_power_modes = False
+        self.expected_fans = 2
+
+    @property
+    def expected_hashboards(self) -> int:
+        """Return the hashboard count seen in the last sgminer poll."""
+        return _LAST_BOARD_COUNT.get(self.ip, 3)
 
     async def get_hostname(self):
         """Return hostname."""
@@ -45,11 +62,11 @@ class BaikalMiner:
         return str(getattr(self, "ip", "")) < str(getattr(other, "ip", ""))
 
 
-async def _sgminer_command(ip: str, command: str, timeout: int = 10):
+async def _sgminer_command(ip: str, command: str, port: int = 4028, timeout: int = 10):
     """Send a single sgminer/cgminer API command and return parsed JSON."""
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, 4028), timeout=timeout
+            asyncio.open_connection(ip, port), timeout=timeout
         )
     except Exception as e:
         _LOGGER.debug("Baikal %s: connect failed for %s: %s", ip, command, e)
@@ -80,9 +97,9 @@ async def _sgminer_command(ip: str, command: str, timeout: int = 10):
             pass
 
 
-async def detect_baikal(ip: str, timeout: int = 10) -> str | None:
+async def detect_baikal(ip: str, port: int = 4028, timeout: int = 10) -> str | None:
     """Return the sgminer version string if the host is a Baikal BK-X."""
-    resp = await _sgminer_command(ip, "version", timeout=timeout)
+    resp = await _sgminer_command(ip, "version", port=port, timeout=timeout)
     if not resp:
         return None
     try:
@@ -93,7 +110,7 @@ async def detect_baikal(ip: str, timeout: int = 10) -> str | None:
     if "sgminer" not in miner.lower():
         return None
     # Baikal devices report BKLU in devs
-    devs = await _sgminer_command(ip, "devs", timeout=timeout)
+    devs = await _sgminer_command(ip, "devs", port=port, timeout=timeout)
     if devs:
         try:
             names = {d.get("Name") for d in devs.get("DEVS", [])}
@@ -105,11 +122,11 @@ async def detect_baikal(ip: str, timeout: int = 10) -> str | None:
     return miner
 
 
-async def fetch_baikal_data(ip: str, timeout: int = 10) -> dict | None:
+async def fetch_baikal_data(ip: str, port: int = 4028, timeout: int = 10) -> dict | None:
     """Fetch a coordinator-compatible data dict from a Baikal BK-X."""
-    version_resp = await _sgminer_command(ip, "version", timeout=timeout)
-    summary_resp = await _sgminer_command(ip, "summary", timeout=timeout)
-    devs_resp = await _sgminer_command(ip, "devs", timeout=timeout)
+    version_resp = await _sgminer_command(ip, "version", port=port, timeout=timeout)
+    summary_resp = await _sgminer_command(ip, "summary", port=port, timeout=timeout)
+    devs_resp = await _sgminer_command(ip, "devs", port=port, timeout=timeout)
     await _sgminer_command(ip, "pools", timeout=timeout)
 
     if not summary_resp:
@@ -140,6 +157,8 @@ async def fetch_baikal_data(ip: str, timeout: int = 10) -> dict | None:
         devs = devs_resp.get("DEVS", []) if devs_resp else []
     except Exception:
         devs = []
+    if devs:
+        _LAST_BOARD_COUNT[ip] = len(devs)
 
     temps = [d.get("Temperature") for d in devs if d.get("Temperature") is not None]
     avg_temp = round(sum(temps) / len(temps), 2) if temps else None

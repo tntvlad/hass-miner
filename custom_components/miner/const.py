@@ -3,6 +3,7 @@
 DOMAIN = "miner"
 
 CONF_IP = "ip"
+CONF_PORT = "port"
 CONF_TITLE = "title"
 CONF_SSH_PASSWORD = "ssh_password"
 CONF_SSH_USERNAME = "ssh_username"

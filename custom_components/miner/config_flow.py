@@ -34,6 +34,7 @@ from .const import (
     CONF_IP,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
+    CONF_PORT,
     CONF_RESCAN,
     CONF_RPC_PASSWORD,
     CONF_SCAN_MINER,
@@ -371,9 +372,20 @@ async def _async_scan_for_miners(
                 )
             if status == "timeout":
                 sleepy_hosts.append(host)
-            if status != "ok":
-                return None
-            return await _identify_via_http(host_str, response)
+            if status == "ok":
+                return await _identify_via_http(host_str, response)
+            # Fall back to cgminer text API (SplitMiner virtual miners and
+            # other cgminer-API devices that do not serve HTTP on port 80).
+            try:
+                from . import splitminer as _splitminer
+
+                fw = await _splitminer.detect_splitminer(host_str, port=4028)
+                if fw is not None:
+                    stats["identified"] += 1
+                    return _splitminer.SplitMiner(host_str, fw, port=4028)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("cgminer text probe failed for %s", host_str, exc_info=True)
+            return None
 
     retry_semaphore = asyncio.Semaphore(SCAN_RETRY_CONCURRENCY)
 
@@ -484,6 +496,7 @@ async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
     """Validate the user input allows us to connect."""
     await hass.async_add_executor_job(_ensure_pyasic)
     miner_ip = data.get(CONF_IP)
+    port = data.get(CONF_PORT, 4028)
 
     miner = await pyasic.get_miner(miner_ip)
     if miner is None:
@@ -491,11 +504,21 @@ async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
         try:
             from . import baikal as _baikal
 
-            fw = await _baikal.detect_baikal(miner_ip)
+            fw = await _baikal.detect_baikal(miner_ip, port=port)
             if fw is not None:
-                miner = _baikal.BaikalMiner(miner_ip, fw)
+                miner = _baikal.BaikalMiner(miner_ip, fw, port=port)
         except Exception as err:  # noqa: BLE001
             _LOGGER.exception("Baikal detection failed for %s: %s", miner_ip, err)
+    if miner is None:
+        # Fall back to SplitMiner virtual miner (cgminer API) detection
+        try:
+            from . import splitminer as _splitminer
+
+            fw = await _splitminer.detect_splitminer(miner_ip, port=port)
+            if fw is not None:
+                miner = _splitminer.SplitMiner(miner_ip, fw, port=port)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("SplitMiner detection failed for %s: %s", miner_ip, err)
     if miner is None:
         return {"base": "cannot_connect"}, None
 
@@ -563,6 +586,20 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data.update(user_input)
 
         entered_value = user_input.get(CONF_IP, "").strip()
+
+        # Allow an optional port suffix (host:port) for miners exposing their
+        # CG-API on a non-default port (e.g. SplitMiner virtual miners).
+        if entered_value and ":" in entered_value and "/" not in entered_value:
+            host_part, _, port_part = entered_value.rpartition(":")
+            try:
+                port_value = int(port_part)
+                entered_value = host_part
+                user_input = dict(user_input)
+                user_input[CONF_IP] = host_part
+                self._data[CONF_IP] = host_part
+                self._data[CONF_PORT] = port_value
+            except ValueError:
+                pass
 
         if not entered_value:
             # No IP entered - scan the network for miners.

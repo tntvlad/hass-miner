@@ -695,6 +695,21 @@ def _is_baikal_miner(miner) -> bool:
     return False
 
 
+def _is_splitminer_miner(miner) -> bool:
+    """Check if miner is a SplitMiner virtual miner."""
+    if miner is None:
+        return False
+    if getattr(miner, "_splitminer", False):
+        return True
+    miner_class_name = miner.__class__.__name__.lower()
+    if "splitminer" in miner_class_name:
+        return True
+    make = str(getattr(miner, "make", "") or "").lower()
+    if make == "splitminer":
+        return True
+    return False
+
+
 async def _fetch_bitaxe_summary(ip: str, timeout: int = 10) -> dict | None:
     """Fetch best share and found blocks from BitAxe via /api/system/info."""
     import aiohttp
@@ -1276,6 +1291,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "is_avalon": _is_avalon_nano_miner(miner),
                 "is_bitaxe": _is_bitaxe_miner(miner),
                 "is_baikal": _is_baikal_miner(miner),
+                "is_splitminer": _is_splitminer_miner(miner),
                 # Mirrors switch._is_vnish_legacy_miner (CGI-bin based VNish 3.x)
                 "is_vnish_legacy": (
                     not has_modern_vnish_api
@@ -1329,11 +1345,20 @@ class MinerCoordinator(DataUpdateCoordinator):
             return None
         if miner is None:
             # Fall back to Baikal BK-X (sgminer) detection
+            from . import const as _const
             from .baikal import BaikalMiner, detect_baikal
 
-            fw = await detect_baikal(miner_ip)
+            port = self.config_entry.data.get(_const.CONF_PORT, 4028)
+            fw = await detect_baikal(miner_ip, port=port)
             if fw is not None:
-                miner = BaikalMiner(miner_ip, fw)
+                miner = BaikalMiner(miner_ip, fw, port=port)
+        if miner is None:
+            from . import splitminer as _splitminer
+
+            port = self.config_entry.data.get(_const.CONF_PORT, 4028)
+            fw = await _splitminer.detect_splitminer(miner_ip, port=port)
+            if fw is not None:
+                miner = _splitminer.SplitMiner(miner_ip, fw, port=port)
         if miner is None:
             return None
 
@@ -1401,9 +1426,26 @@ class MinerCoordinator(DataUpdateCoordinator):
         if _is_baikal_miner(self.miner):
             from . import baikal as _baikal
 
-            fetched = await _baikal.fetch_baikal_data(self.miner.ip)
+            fetched = await _baikal.fetch_baikal_data(self.miner.ip, port=getattr(self.miner, "port", 4028))
             if fetched is None:
                 return self._keep_last_or_fail("Baikal data fetch failed")
+            self._failure_count = 0
+            self._primed_offline = False
+            data = fetched
+            with contextlib.suppress(Exception):
+                await self._persist_device_profile(data)
+            self.data = data
+            return data
+
+        # SplitMiner virtual miner (cgminer API) uses a direct fetcher.
+        if _is_splitminer_miner(self.miner):
+            from . import splitminer as _splitminer
+
+            fetched = await _splitminer.fetch_splitminer_data(
+                self.miner.ip, port=getattr(self.miner, "port", 4028)
+            )
+            if fetched is None:
+                return self._keep_last_or_fail("SplitMiner data fetch failed")
             self._failure_count = 0
             self._primed_offline = False
             data = fetched
