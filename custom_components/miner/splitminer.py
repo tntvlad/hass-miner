@@ -33,7 +33,6 @@ class SplitMiner:
         self.supports_autotuning = False
         self.supports_power_modes = False
         self.expected_fans = 0
-        self.expected_hashboards = None
 
     @property
     def expected_hashboards(self):
