@@ -477,6 +477,13 @@ async def validate_ip_input(hass: HomeAssistant, data: dict[str, str]):
 
     miner = await pyasic.get_miner(miner_ip)
     if miner is None:
+        # Fall back to Baikal BK-X (sgminer) detection
+        from . import baikal as _baikal
+
+        fw = await _baikal.detect_baikal(miner_ip)
+        if fw is not None:
+            miner = _baikal.BaikalMiner(miner_ip, fw)
+    if miner is None:
         return {"base": "Unable to connect to Miner, is IP correct?"}, None
 
     return {}, miner
@@ -706,6 +713,12 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Detect BitAxe miners and skip credential prompts
         if self._miner.make == MinerMake.BITAXE:
+            return await self.async_step_title()
+
+        # Detect Baikal BK-X miners (sgminer, no credentials) and skip prompts
+        if getattr(self._miner, "_baikal", False) or str(
+            getattr(self._miner, "make", "")
+        ).lower() == "baikal":
             return await self.async_step_title()
 
         schema_data = {}

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.2-b1 (2026-11-07)
+
+Beta 1 of the 1.4.2 line.
+
+**Highlights**
+
+- **Baikal BK-X support** — the Baikal BK-X (sgminer 5.6.6-l based, 3x BKLU
+  FPGA) is now detected and monitored: hashrate, temperature, per-device board
+  temperatures and hashrates, best share and found blocks. Detection works via
+  the sgminer API on port 4028.
+
+
 ## v1.4.1 (2026-11-04)
 
 Stable release of the 1.4.1 line. Consolidates the v1.4.1-b1 … b2 work.

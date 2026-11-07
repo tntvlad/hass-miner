@@ -1,6 +1,7 @@
 """Miner DataUpdateCoordinator."""
 
 import asyncio
+import contextlib
 import copy
 import logging
 import re
@@ -82,6 +83,8 @@ DEFAULT_DATA = {
     "bitaxe_frequency": None,
     "bitaxe_min_frequency": None,
     "bitaxe_max_frequency": None,
+    "baikal_best_share": None,
+    "baikal_found_blocks": None,
 }
 
 
@@ -677,6 +680,21 @@ def _is_bitaxe_miner(miner) -> bool:
     return False
 
 
+def _is_baikal_miner(miner) -> bool:
+    """Check if miner is a Baikal BK-X (sgminer-based) device."""
+    if miner is None:
+        return False
+    if getattr(miner, "_baikal", False):
+        return True
+    miner_class_name = miner.__class__.__name__.lower()
+    if "baikal" in miner_class_name:
+        return True
+    make = str(getattr(miner, "make", "") or "").lower()
+    if make == "baikal":
+        return True
+    return False
+
+
 async def _fetch_bitaxe_summary(ip: str, timeout: int = 10) -> dict | None:
     """Fetch best share and found blocks from BitAxe via /api/system/info."""
     import aiohttp
@@ -1257,6 +1275,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "is_bos": _is_bos_miner(miner, fw_ver),
                 "is_avalon": _is_avalon_nano_miner(miner),
                 "is_bitaxe": _is_bitaxe_miner(miner),
+                "is_baikal": _is_baikal_miner(miner),
                 # Mirrors switch._is_vnish_legacy_miner (CGI-bin based VNish 3.x)
                 "is_vnish_legacy": (
                     not has_modern_vnish_api
@@ -1308,6 +1327,13 @@ class MinerCoordinator(DataUpdateCoordinator):
         except (TimeoutError, asyncio.TimeoutError):
             _LOGGER.warning("get_miner timed out for %s - treating as offline", miner_ip)
             return None
+        if miner is None:
+            # Fall back to Baikal BK-X (sgminer) detection
+            from .baikal import BaikalMiner, detect_baikal
+
+            fw = await detect_baikal(miner_ip)
+            if fw is not None:
+                miner = BaikalMiner(miner_ip, fw)
         if miner is None:
             return None
 
@@ -1370,6 +1396,21 @@ class MinerCoordinator(DataUpdateCoordinator):
 
         # At this point, miner is valid
         _LOGGER.debug(f"Found miner: {self.miner}")
+
+        # Baikal BK-X (sgminer) uses a direct fetcher instead of pyasic.
+        if _is_baikal_miner(self.miner):
+            from . import baikal as _baikal
+
+            fetched = await _baikal.fetch_baikal_data(self.miner.ip)
+            if fetched is None:
+                return self._keep_last_or_fail("Baikal data fetch failed")
+            self._failure_count = 0
+            self._primed_offline = False
+            data = fetched
+            with contextlib.suppress(Exception):
+                await self._persist_device_profile(data)
+            self.data = data
+            return data
 
         # Base data options to fetch
         data_options = [
