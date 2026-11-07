@@ -55,7 +55,7 @@
       "invalid_selection": "The selected miner could no longer be found. Scan again.",
       "invalid_cidr": "Invalid network range. Use CIDR notation, e.g. 192.168.1.0/24.",
       "cidr_too_large": "Network range is too large to scan (max 1024 addresses).",
-      "cannot_connect": "Unable to connect to the miner. Check the IP address and that the miner is online."
+      "cannot_connect": "Unable to connect to the miner. Check the IP address and that the miner is online.",
       "unknown": "Unknown error occurred."
     },
     "progress": {

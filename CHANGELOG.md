@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.2-b3 (2026-11-07)
+
+Beta 3 of the 1.4.2 line.
+
+**Fixes**
+
+- **JSON syntax fix** — missing comma in `strings.json`/`translations/en.json`
+  `cannot_connect` entry caused HA setup to fail with orjson decode error.
+
+
 ## v1.4.2-b2 (2026-11-07)
 
 Beta 2 of the 1.4.2 line.
