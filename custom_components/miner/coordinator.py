@@ -1439,7 +1439,15 @@ class MinerCoordinator(DataUpdateCoordinator):
             return round(value, 2)
 
         try:
-            hashrate = normalize_hashrate_to_th(miner_data.hashrate)
+            # VNish can have non-consecutive board slots (e.g. 1, 2, 4).
+            # pyasic's board sum can omit a live board; its raw_hashrate is
+            # the miner-wide RPC total. Keep a missing total unknown.
+            source_hashrate = (
+                miner_data.raw_hashrate
+                if _is_vnish_miner(self.miner, miner_data.fw_ver)
+                else miner_data.hashrate
+            )
+            hashrate = normalize_hashrate_to_th(source_hashrate)
         except TypeError:
             hashrate = None
 
