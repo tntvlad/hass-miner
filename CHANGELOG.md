@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **VNish total hashrate** — use the miner-wide RPC total instead of pyasic's
+  board sum, which can omit a live board when slots are non-consecutive (for
+  example, 1, 2 and 4). This also corrects the derived efficiency. Missing totals
+  remain unknown; individual board discovery is unchanged.
+
 ## v1.4.1 (2026-11-04)
 
 Stable release of the 1.4.1 line. Consolidates the v1.4.1-b1 … b2 work.
