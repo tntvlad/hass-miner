@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from .const import (
     CONF_CACHED_PROFILE,
     CONF_IP,
+    CONF_PORT,
     DOMAIN,
     MINER_DETECTION_TIMEOUT,
     PYASIC_VERSION,
@@ -130,6 +131,25 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         )
     except (TimeoutError, asyncio.TimeoutError):
         miner = None
+
+    if miner is None:
+        # pyasic has no driver for the sgminer-based Baikal BK-X, so the
+        # config flow's port-4028 probe is the only way such an entry can
+        # ever be created. Repeat that probe here, otherwise the entry can
+        # never get past its first setup and stays in "retrying setup".
+        from .baikal import BaikalMiner, detect_baikal
+
+        fw = await detect_baikal(miner_ip)
+        if fw is not None:
+            miner = BaikalMiner(miner_ip, fw)
+
+    if miner is None:
+        from . import splitminer as _splitminer
+
+        port = config_entry.data.get(CONF_PORT, 4028)
+        fw = await _splitminer.detect_splitminer(miner_ip, port=port)
+        if fw is not None:
+            miner = _splitminer.SplitMiner(miner_ip, fw, port=port)
 
     if miner is None and not config_entry.data.get(CONF_CACHED_PROFILE):
         # Never seen this miner successfully -> nothing to build entities

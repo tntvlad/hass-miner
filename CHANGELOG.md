@@ -1,11 +1,81 @@
 # Changelog
 
-## Unreleased
+## v1.4.2 (2026-11-18)
 
+Stable release of the 1.4.2 line. Consolidates the v1.4.2-b1 … b5 work plus
+the VNish total-hashrate fix.
+
+**Highlights**
+
+- **Baikal BK-X (sgminer) support** — detect and monitor Baikal BK-X miners via
+  the sgminer API on port 4028, including per-board hashrates and temperatures,
+  best share and found blocks.
+- **SplitMiner / virtual miner support** — detect and monitor SplitMiner
+  virtual miners (cgminer API on ports 4028+) via scan and manual IP entry
+  (host:port supported).
 - **VNish total hashrate** — use the miner-wide RPC total instead of pyasic's
   board sum, which can omit a live board when slots are non-consecutive (for
   example, 1, 2 and 4). This also corrects the derived efficiency. Missing totals
   remain unknown; individual board discovery is unchanged.
+- **Setup reliability** — fixed a JSON syntax error in `strings.json` /
+  `translations/en.json` (`cannot_connect`) that broke HA setup, and made the
+  Baikal scan/manual-add path work without errors.
+- **SplitMiner expected hashboards** — the `expected_hashboards` property is no
+  longer shadowed by a stale instance attribute.
+
+## v1.4.2-b5 (2026-11-07)
+
+Beta 5 of the 1.4.2 line.
+
+**Fixes**
+
+- **SplitMiner expected hashboards** — removed the stale instance attribute
+  that shadowed the `expected_hashboards` property.
+
+## v1.4.2-b4 (2026-11-07)
+
+Beta 4 of the 1.4.2 line.
+
+**Highlights**
+
+- **SplitMiner / virtual miner support** — detect and monitor SplitMiner
+  virtual miners (cgminer API on ports 4028+) via scan and manual IP entry
+  (host:port supported).
+
+
+## v1.4.2-b3 (2026-11-07)
+
+Beta 3 of the 1.4.2 line.
+
+**Fixes**
+
+- **JSON syntax fix** — missing comma in `strings.json`/`translations/en.json`
+  `cannot_connect` entry caused HA setup to fail with orjson decode error.
+
+
+## v1.4.2-b2 (2026-11-07)
+
+Beta 2 of the 1.4.2 line.
+
+**Fixes**
+
+- **Baikal scan + manual add** — the network scan now detects Baikal BK-X miners
+  (sgminer on port 4028) and the manual IP flow no longer errors out; added
+  `get_hostname`/`get_mac` to the Baikal sentinel and a proper `cannot_connect`
+  error key.
+
+
+## v1.4.2-b1 (2026-11-07)
+
+Beta 1 of the 1.4.2 line.
+
+**Highlights**
+
+- **Baikal BK-X support** — the Baikal BK-X (sgminer 5.6.6-l based, 3x BKLU
+  FPGA) is now detected and monitored: hashrate, temperature, per-device board
+  temperatures and hashrates, best share and found blocks. Detection works via
+  the sgminer API on port 4028.
+
 
 ## v1.4.1 (2026-11-04)
 
