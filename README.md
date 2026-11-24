@@ -117,6 +117,9 @@ Turning it on reboots the miner so it can resume hashing. The switch reports sta
 from the hashboard power supply and may be unknown while the miner reboots or
 when power telemetry is unavailable.
 
+The **Work Mode** selector configures **Normal** or **High Performance**. The
+selected mode takes effect after the miner reboots.
+
 ---
 
 ### Whatsminer

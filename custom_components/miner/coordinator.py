@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .avalon import fetch_hashpower, is_avalon_1246
+from .avalon import fetch_1246_workmode, fetch_hashpower, is_avalon_1246
 from .const import (
     AVAILABILITY_FAILURE_THRESHOLD,
     AVALON_MODE_FULL,
@@ -1658,6 +1658,7 @@ class MinerCoordinator(DataUpdateCoordinator):
             data["make"], data["model"]
         ):
             data["avalon_hashpower"] = await fetch_hashpower(self.miner.ip)
+            data["avalon_workmode"] = await fetch_1246_workmode(self.miner.ip)
 
         # Fetch VNish data for VNish firmware miners
         if _is_vnish_miner(self.miner, miner_data.fw_ver):

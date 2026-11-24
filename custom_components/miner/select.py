@@ -12,10 +12,12 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .avalon import WORK_MODES_1246, is_avalon_1246, set_1246_workmode
 from .const import AVALON_MODE_FULL, CONF_AVALON_CONTROL_MODE, CONF_WEB_PASSWORD, DOMAIN
 from .coordinator import MinerCoordinator
 
@@ -28,6 +30,7 @@ WORK_MODES = {
     "High": 2,
 }
 REVERSE_WORK_MODES = {v: k for k, v in WORK_MODES.items()}
+REVERSE_WORK_MODES_1246 = {value: name for name, value in WORK_MODES_1246.items()}
 
 # LED Effect mapping for Avalon Nano 3s
 LED_EFFECTS = {
@@ -410,6 +413,10 @@ async def async_setup_entry(
         )
         entities.append(AvalonWorkModeSelect(coordinator))
         entities.append(AvalonLedEffectSelect(coordinator))
+    elif avalon_mode == AVALON_MODE_FULL and is_avalon_1246(
+        coordinator.data.get("make"), coordinator.data.get("model")
+    ):
+        entities.append(Avalon1246WorkModeSelect(coordinator))
 
     # Add VNish preset select for VNish firmware miners
     if is_vnish_miner(coordinator):
@@ -423,18 +430,11 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
-    """Select entity for Avalon miner workmode (Low/Mid/High)."""
+class _AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
+    """Common device identity for Avalon work mode selectors."""
 
     _attr_has_entity_name = True
-    _attr_options = list(WORK_MODES.keys())
     _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(self, coordinator: MinerCoordinator):
-        """Initialize the workmode select entity."""
-        super().__init__(coordinator=coordinator)
-        self._api = AvalonCGMinerAPI(coordinator.data["ip"])
-        self._current_mode: str | None = None
 
     @property
     def name(self) -> str | None:
@@ -459,6 +459,23 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
     def unique_id(self) -> str | None:
         """Return device UUID."""
         return f"{self.coordinator.config_entry.entry_id}-workmode"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the miner is reachable."""
+        return self.coordinator.available
+
+
+class AvalonWorkModeSelect(_AvalonWorkModeSelect):
+    """Select entity for Avalon Nano work mode (Low/Mid/High)."""
+
+    _attr_options = list(WORK_MODES)
+
+    def __init__(self, coordinator: MinerCoordinator):
+        """Initialize the workmode select entity."""
+        super().__init__(coordinator=coordinator)
+        self._api = AvalonCGMinerAPI(coordinator.data["ip"])
+        self._current_mode: str | None = None
 
     @property
     def current_option(self) -> str | None:
@@ -508,10 +525,27 @@ class AvalonWorkModeSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
             self._current_mode = REVERSE_WORK_MODES.get(workmode, "Low")
         super()._handle_coordinator_update()
 
+class Avalon1246WorkModeSelect(_AvalonWorkModeSelect):
+    """Configure Normal or High Performance on the Avalon 1246."""
+
+    _attr_options = list(WORK_MODES_1246)
+
     @property
-    def available(self) -> bool:
-        """Return if entity is available or not."""
-        return self.coordinator.available
+    def current_option(self) -> str | None:
+        """Return the configured mode from the miner's response."""
+        return REVERSE_WORK_MODES_1246.get(self.coordinator.data.get("avalon_workmode"))
+
+    async def async_select_option(self, option: str) -> None:
+        """Configure the mode that takes effect after reboot."""
+        if not self.available:
+            raise HomeAssistantError("Avalon miner is offline")
+        try:
+            await set_1246_workmode(self.coordinator.data["ip"], WORK_MODES_1246[option])
+        except (OSError, TimeoutError, asyncio.LimitOverrunError) as err:
+            raise HomeAssistantError(
+                f"Could not set Avalon work mode to {option}"
+            ) from err
+        await self.coordinator.async_request_refresh()
 
 
 class AvalonLedEffectSelect(CoordinatorEntity[MinerCoordinator], SelectEntity):
