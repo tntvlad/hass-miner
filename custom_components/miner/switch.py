@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry, entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .avalon import is_avalon_1246, set_hashpower
 from .const import AVALON_MODE_FULL, CONF_AVALON_CONTROL_MODE, DOMAIN
 from .coordinator import MinerCoordinator, _is_avalon_nano_miner, _is_bos_miner
 
@@ -94,28 +95,31 @@ async def async_setup_entry(
     miner = coordinator.miner
     offline = miner is None
     profile = coordinator.cached_profile
+    avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
+    identity = profile if offline else coordinator.data
+    uses_hashpower = avalon_mode == AVALON_MODE_FULL and is_avalon_1246(
+        identity.get("make"), identity.get("model")
+    )
     fw_ver = (coordinator.data or {}).get("fw_ver", "") or ""
     is_bos = (
         _is_bos_miner(miner, fw_ver)
         or (miner is not None and "bos" in str(miner).lower())
         or (offline and profile.get("is_bos", False))
     )
-    if (
+    if not uses_hashpower and (
         is_bos
         or (miner is not None and miner.supports_shutdown)
         or (offline and profile.get("supports_shutdown", False))
     ):
         entities.append(MinerActiveSwitch(coordinator=coordinator))
 
-    # Check if user wants full CGMiner control for Avalon miners
-    avalon_mode = config_entry.data.get(CONF_AVALON_CONTROL_MODE, AVALON_MODE_FULL)
-
-    # Avalon Nano 3s mining switch (uses CGMiner API) - only in full mode
-    is_avalon = _is_avalon_nano_miner(miner) or (
+    is_avalon_nano = _is_avalon_nano_miner(miner) or (
         offline and profile.get("is_avalon", False)
     )
-    if is_avalon and avalon_mode == AVALON_MODE_FULL:
-        entities.append(AvalonMiningSwitch(coordinator=coordinator))
+    if (is_avalon_nano or uses_hashpower) and avalon_mode == AVALON_MODE_FULL:
+        entities.append(
+            AvalonMiningSwitch(coordinator=coordinator, uses_hashpower=uses_hashpower)
+        )
 
     # Legacy VNish 3.x mining switch (uses CGI-bin endpoints)
     if _is_vnish_legacy_miner(coordinator):
@@ -246,18 +250,24 @@ class MinerActiveSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
 
 
 class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
-    """Switch to pause/resume mining on Avalon Nano 3s via CGMiner API."""
+    """Switch to pause or resume mining on supported Avalon models."""
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:pickaxe"
 
-    def __init__(self, coordinator: MinerCoordinator) -> None:
+    def __init__(
+        self, coordinator: MinerCoordinator, uses_hashpower: bool = False
+    ) -> None:
         """Initialize the switch."""
         super().__init__(coordinator=coordinator)
         self._attr_unique_id = f"{self.coordinator.config_entry.entry_id}-avalon-mining"
-        # Get initial state from coordinator data, default to True
-        asc_enabled = self.coordinator.data.get("avalon_asc_enabled")
-        self._attr_is_on = asc_enabled if asc_enabled is not None else True
+        self._uses_hashpower = uses_hashpower
+        if uses_hashpower:
+            self._attr_is_on = self.coordinator.data.get("avalon_hashpower")
+            self._hashpower_lock = asyncio.Lock()
+        else:
+            asc_enabled = self.coordinator.data.get("avalon_asc_enabled")
+            self._attr_is_on = asc_enabled if asc_enabled is not None else True
         self._updating_switch = False
 
     @property
@@ -313,8 +323,29 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             _LOGGER.error("Failed to send CGMiner command '%s': %s", command, e)
             return False
 
+    async def _async_set_hashpower(self, enabled: bool) -> None:
+        """Change hashboard power and refresh the reported state."""
+        async with self._hashpower_lock:
+            if not self.coordinator.available:
+                raise HomeAssistantError("Avalon miner is offline")
+            # Avoid rebooting an Avalon that is already mining.
+            if enabled and self.is_on is True:
+                return
+            try:
+                await set_hashpower(self.coordinator.data["ip"], enabled)
+            except (OSError, TimeoutError, asyncio.LimitOverrunError) as err:
+                raise HomeAssistantError(
+                    f"Could not {'start' if enabled else 'stop'} Avalon mining"
+                ) from err
+            self._attr_is_on = None
+            self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
+
     async def async_turn_on(self) -> None:
-        """Enable mining (ascenable)."""
+        """Resume mining on the Avalon."""
+        if self._uses_hashpower:
+            await self._async_set_hashpower(True)
+            return
         _LOGGER.info(
             "%s: Enabling mining via CGMiner API", self.coordinator.config_entry.title
         )
@@ -329,7 +360,10 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
             _LOGGER.error("Failed to enable mining")
 
     async def async_turn_off(self) -> None:
-        """Disable mining (ascdisable)."""
+        """Stop mining on the Avalon."""
+        if self._uses_hashpower:
+            await self._async_set_hashpower(False)
+            return
         _LOGGER.info(
             "%s: Disabling mining via CGMiner API", self.coordinator.config_entry.title
         )
@@ -346,6 +380,10 @@ class AvalonMiningSwitch(CoordinatorEntity[MinerCoordinator], SwitchEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        if self._uses_hashpower:
+            self._attr_is_on = self.coordinator.data.get("avalon_hashpower")
+            super()._handle_coordinator_update()
+            return
         # Check ASC enabled state from coordinator data (from devs command)
         asc_enabled = self.coordinator.data.get("avalon_asc_enabled")
         if asc_enabled is not None:

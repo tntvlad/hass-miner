@@ -109,6 +109,19 @@ Avalon units can be configured in **Simple** mode (pyasic only) or **Full** mode
 
 ---
 
+### Avalon 1246
+
+**Full** mode adds a **Mining** switch using the stock CGMiner API on TCP port 4028.
+Turning it off cuts hashboard power while the controller and fans remain powered.
+Turning it on reboots the miner so it can resume hashing. The switch reports state
+from the hashboard power supply and may be unknown while the miner reboots or
+when power telemetry is unavailable.
+
+The **Work Mode** selector configures **Normal** or **High Performance**. The
+selected mode takes effect after the miner reboots.
+
+---
+
 ### Whatsminer
 
 - **Auto API enable** — automatically enables the Whatsminer write API when a "can't access write cmd" error occurs
